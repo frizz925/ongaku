@@ -9,6 +9,10 @@
 
 #define ERRMSG_EAFNOSUPPORT "Unsupported socket family"
 
+int socket_errno() {
+    return WSAGetLastError();
+}
+
 const char *socket_strerror() {
     static char msg[256];
     msg[0] = '\0';
@@ -57,6 +61,10 @@ int socket_terminate(const char **message) {
 
 #define ERRMSG_EAFNOSUPPORT strerror(EAFNOSUPPORT);
 
+int socket_errno() {
+    return errno;
+}
+
 const char *socket_strerror() {
     return strerror(errno);
 }
@@ -94,6 +102,22 @@ error:
         close(sock);
     *message = socket_strerror();
     return SOCKET_ERROR;
+}
+
+int socket_set_timeout(socket_t sock, double timeout, const char **message) {
+#ifdef _WIN32
+    DWORD tv = timeout * 1e3;
+#else
+    struct timeval tv = {
+        .tv_sec = timeout,
+        .tv_usec = (long)(timeout * 1e6) % 1000000,
+    };
+#endif
+    if (setsockopt(sock, SOL_SOCKET, SO_RCVTIMEO, (optval_t *)&tv, sizeof(tv))) {
+        *message = socket_strerror();
+        return -1;
+    }
+    return 0;
 }
 
 void sockaddr_ipv4(struct sockaddr *sa, size_t socklen, in_addr_t addr, uint16_t port) {
