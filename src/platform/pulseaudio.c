@@ -1,0 +1,361 @@
+#include "../audio.h"
+
+#include <pulse/pulseaudio.h>
+
+#include <stdatomic.h>
+#include <stdbool.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+
+#define STREAM_DIRECTION_IN 1
+#define STREAM_DIRECTION_OUT 2
+
+#define STREAM_CONTEXT_FIELDS \
+    atomic_bool running; \
+    const char *dev; \
+    pa_stream *pa_stream; \
+    audio_stream_t *stream; \
+    audio_error_callback_t error_cb; \
+    void *userdata;
+
+static const pa_stream_flags_t stream_flags = PA_STREAM_ADJUST_LATENCY;
+static pa_threaded_mainloop *mainloop = NULL;
+static atomic_int lock_count = 0;
+
+typedef struct {
+    STREAM_CONTEXT_FIELDS
+} stream_context_t;
+
+typedef struct {
+    STREAM_CONTEXT_FIELDS
+    audio_record_callback_t record_cb;
+} record_context_t;
+
+typedef struct {
+    STREAM_CONTEXT_FIELDS
+    audio_playback_callback_t playback_cb;
+} playback_context_t;
+
+struct audio_stream {
+    pa_sample_spec sample_spec;
+    pa_buffer_attr buffer_attr;
+
+    pa_context *pa_context;
+
+    record_context_t record;
+    playback_context_t playback;
+
+    atomic_bool connected;
+    atomic_int lock_count;
+};
+
+static void on_context_state(pa_context *context, void *userdata) {
+    switch (pa_context_get_state(context)) {
+    case PA_CONTEXT_READY:
+    case PA_CONTEXT_TERMINATED:
+    case PA_CONTEXT_FAILED:
+        pa_threaded_mainloop_signal((pa_threaded_mainloop *)userdata, 0);
+    default:
+        break;
+    }
+}
+
+static int context_stop(stream_context_t *ctx, const char **message);
+
+static void on_audio_read(pa_stream *stream, size_t nbytes, void *userdata) {
+    int err;
+    const char *message;
+    const void *data;
+    audio_callback_result_t result;
+    record_context_t *ctx = userdata;
+
+    if ((err = pa_stream_peek(stream, &data, &nbytes))) {
+        result = ctx->error_cb(pa_strerror(err), ctx->userdata);
+        goto end;
+    }
+    if (nbytes <= 0)
+        return;
+    if (data)
+        result = ctx->record_cb(data, nbytes, ctx->userdata);
+    if (result == AUDIO_STREAM_CONTINUE && (err = pa_stream_drop(stream)) != 0)
+        result = ctx->error_cb(pa_strerror(err), ctx->userdata);
+
+end:
+    switch (result) {
+    case AUDIO_STREAM_COMPLETE:
+    case AUDIO_STREAM_ABORT:
+        if (context_stop((stream_context_t *)ctx, &message))
+            ctx->error_cb(message, ctx->userdata);
+        break;
+    case AUDIO_STREAM_CONTINUE:
+        break;
+    }
+}
+
+static void on_audio_write(pa_stream *stream, size_t nbytes, void *userdata) {
+    int err;
+    const char *message;
+    void *data;
+    audio_callback_result_t result;
+    playback_context_t *ctx = (playback_context_t *)userdata;
+
+    if ((err = pa_stream_begin_write(stream, &data, &nbytes))) {
+        result = ctx->error_cb(pa_strerror(err), ctx->userdata);
+        goto end;
+    }
+    result = ctx->playback_cb(data, &nbytes, ctx->userdata);
+    if (result == AUDIO_STREAM_CONTINUE && nbytes > 0) {
+        if ((err = pa_stream_write(stream, data, nbytes, NULL, 0, PA_SEEK_RELATIVE)))
+            result = ctx->error_cb(pa_strerror(err), ctx->userdata);
+    } else {
+        if ((err = pa_stream_cancel_write(stream)))
+            result = ctx->error_cb(pa_strerror(err), ctx->userdata);
+    }
+
+end:
+    switch (result) {
+    case AUDIO_STREAM_COMPLETE:
+    case AUDIO_STREAM_ABORT:
+        if (context_stop((stream_context_t *)ctx, &message))
+            ctx->error_cb(message, ctx->userdata);
+        break;
+    case AUDIO_STREAM_CONTINUE:
+        break;
+    }
+}
+
+static inline void mainloop_lock() {
+    pa_threaded_mainloop_lock(mainloop);
+    lock_count++;
+}
+
+static inline void mainloop_unlock() {
+    if (lock_count <= 0)
+        return;
+    pa_threaded_mainloop_unlock(mainloop);
+    lock_count--;
+}
+
+static inline void mainloop_unlock_all() {
+    while (lock_count > 0)
+        mainloop_unlock();
+}
+
+static void context_init(stream_context_t *context,
+                         const char *dev,
+                         const char *name,
+                         audio_error_callback_t error_cb,
+                         void *userdata,
+                         const char **message) {
+    audio_stream_t *stream = context->stream;
+    context->dev = dev;
+    context->pa_stream = pa_stream_new(stream->pa_context, name, &stream->sample_spec, NULL);
+    context->error_cb = error_cb;
+    context->userdata = userdata;
+}
+
+static int context_start(stream_context_t *ctx, int direction, const char **message) {
+    if (ctx->running || !ctx->pa_stream)
+        return 0;
+    int err =
+        direction == STREAM_DIRECTION_IN
+            ? pa_stream_connect_record(ctx->pa_stream, ctx->dev, &ctx->stream->buffer_attr, stream_flags)
+            : pa_stream_connect_playback(ctx->pa_stream, ctx->dev, &ctx->stream->buffer_attr, stream_flags, NULL, NULL);
+    if (err) {
+        *message = pa_strerror(err);
+        return -1;
+    }
+    ctx->running = true;
+    return 0;
+}
+
+static int context_stop(stream_context_t *ctx, const char **message) {
+    if (!ctx->running || !ctx->pa_stream)
+        return 0;
+    int err = pa_stream_disconnect(ctx->pa_stream);
+    if (err) {
+        *message = pa_strerror(err);
+        return -1;
+    }
+    ctx->running = false;
+    return 0;
+}
+
+static void context_deinit(stream_context_t *context) {
+    if (context->pa_stream)
+        pa_stream_unref(context->pa_stream);
+    context->dev = NULL;
+    context->pa_stream = NULL;
+    context->error_cb = NULL;
+    context->userdata = NULL;
+}
+
+int audio_init(const char **message) {
+    int err;
+    if (mainloop)
+        return 0;
+    mainloop = pa_threaded_mainloop_new();
+    if ((err = pa_threaded_mainloop_start(mainloop))) {
+        *message = pa_strerror(err);
+        return -1;
+    }
+    return 0;
+}
+
+int audio_terminate(const char **message) {
+    if (!mainloop)
+        return 0;
+    mainloop_unlock_all();
+    pa_threaded_mainloop_stop(mainloop);
+    pa_threaded_mainloop_free(mainloop);
+    mainloop = NULL;
+    return 0;
+}
+
+audio_stream_t *audio_stream_new(const audio_stream_params_t *params) {
+    audio_stream_t *stream = malloc(audio_stream_sizeof());
+    audio_stream_init(stream, params);
+    return stream;
+}
+
+void audio_stream_init(audio_stream_t *stream, const audio_stream_params_t *params) {
+    assert(mainloop != NULL);
+    memset(stream, 0, audio_stream_sizeof());
+
+#if SAMPLE_TYPE == uint16_t
+    stream->sample_spec.format = PA_SAMPLE_S16LE;
+#elif SAMPLE_TYPE == float
+    stream->sample_spec.format = PA_SAMPLE_FLOAT32LE;
+#endif
+    stream->sample_spec.channels = params->channels;
+    stream->sample_spec.rate = params->sample_rate;
+
+    size_t bufsize = audio_stream_frame_bufsize(params);
+    stream->buffer_attr.maxlength = bufsize;
+    stream->buffer_attr.tlength = bufsize;
+    stream->buffer_attr.prebuf = sizeof(uint32_t) - 1;
+
+    pa_mainloop_api *api = pa_threaded_mainloop_get_api(mainloop);
+    stream->pa_context = pa_context_new(api, params->application_name);
+    pa_context_set_state_callback(stream->pa_context, on_context_state, mainloop);
+
+    stream->record.stream = stream;
+    stream->playback.stream = stream;
+}
+
+audio_stream_state_t audio_stream_get_state(audio_stream_t *stream) {
+    if (stream->record.running)
+        return AUDIO_STREAM_RUNNING;
+    if (stream->playback.running)
+        return AUDIO_STREAM_RUNNING;
+    if (stream->connected)
+        return AUDIO_STREAM_CONNECTED;
+    return AUDIO_STREAM_DISCONNECTED;
+}
+
+int audio_stream_connect(audio_stream_t *stream, const char **message) {
+    int err;
+    if (stream->connected)
+        return 0;
+
+    mainloop_lock();
+    if ((err = pa_context_connect(stream->pa_context, NULL, 0, NULL)))
+        goto fail;
+
+    while (pa_context_get_state(stream->pa_context) != PA_CONTEXT_READY)
+        pa_threaded_mainloop_wait(mainloop);
+
+    mainloop_unlock();
+    stream->connected = true;
+    return 0;
+
+fail:
+    *message = pa_strerror(err);
+    mainloop_unlock();
+    return -1;
+}
+
+int audio_stream_open_record(audio_stream_t *stream,
+                             const char *dev,
+                             const char *name,
+                             audio_record_callback_t record_cb,
+                             audio_error_callback_t error_cb,
+                             void *userdata,
+                             const char **message) {
+    mainloop_lock();
+    context_init((stream_context_t *)&stream->record, dev, name, error_cb, userdata, message);
+    pa_stream_set_read_callback(stream->record.pa_stream, on_audio_read, &stream->record);
+    stream->record.record_cb = record_cb;
+    mainloop_unlock();
+    return 0;
+}
+
+int audio_stream_open_playback(audio_stream_t *stream,
+                               const char *dev,
+                               const char *name,
+                               audio_playback_callback_t playback_cb,
+                               audio_error_callback_t error_cb,
+                               void *userdata,
+                               const char **message) {
+    mainloop_lock();
+    context_init((stream_context_t *)&stream->playback, dev, name, error_cb, userdata, message);
+    pa_stream_set_write_callback(stream->playback.pa_stream, on_audio_write, &stream->playback);
+    stream->playback.playback_cb = playback_cb;
+    mainloop_unlock();
+    return 0;
+}
+
+int audio_stream_start(audio_stream_t *stream, const char **message) {
+    if (context_start((stream_context_t *)&stream->record, STREAM_DIRECTION_IN, message))
+        return -1;
+    if (context_start((stream_context_t *)&stream->playback, STREAM_DIRECTION_OUT, message))
+        return -1;
+    return 0;
+}
+
+int audio_stream_stop(audio_stream_t *stream, const char **message) {
+    if (context_stop((stream_context_t *)&stream->record, message))
+        return -1;
+    if (context_stop((stream_context_t *)&stream->playback, message))
+        return -1;
+    return 0;
+}
+
+int audio_stream_close_record(audio_stream_t *stream, const char **message) {
+    context_deinit((stream_context_t *)&stream->record);
+    return 0;
+}
+
+int audio_stream_close_playback(audio_stream_t *stream, const char **message) {
+    context_deinit((stream_context_t *)&stream->playback);
+    return 0;
+}
+
+int audio_stream_disconnect(audio_stream_t *stream, const char **message) {
+    if (!stream->connected)
+        return 0;
+    mainloop_lock();
+    pa_context_disconnect(stream->pa_context);
+    mainloop_unlock();
+    stream->connected = false;
+    return 0;
+}
+
+void audio_stream_deinit(audio_stream_t *stream) {
+    if (stream->pa_context)
+        pa_context_unref(stream->pa_context);
+
+    stream->record.pa_stream = NULL;
+    stream->playback.pa_stream = NULL;
+    stream->pa_context = NULL;
+}
+
+void audio_stream_free(audio_stream_t *stream) {
+    audio_stream_deinit(stream);
+    free(stream);
+}
+
+size_t audio_stream_sizeof() {
+    return sizeof(audio_stream_t);
+}
