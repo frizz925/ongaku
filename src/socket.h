@@ -5,11 +5,11 @@
 #define SOCKET_ERROR SOCKET_UNDEFINED
 
 #if _WIN32
+#include <winsock2.h>
 
 #include <io.h>
 #include <stdint.h>
 #include <windows.h>
-#include <winsock2.h>
 #include <ws2tcpip.h>
 
 typedef SOCKET socket_t;
