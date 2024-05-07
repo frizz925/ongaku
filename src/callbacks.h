@@ -8,12 +8,12 @@
 #include "opus/opus.h"
 
 int callback_write_record(const void *src,
-                         size_t srclen,
-                         const audio_stream_params_t *params,
-                         OpusEncoder *enc,
-                         char *buf,
-                         size_t buflen,
-                         const char **message);
+                          size_t srclen,
+                          const audio_stream_params_t *params,
+                          OpusEncoder *enc,
+                          char *buf,
+                          size_t buflen,
+                          const char **message);
 int callback_read_playback(void *dst, size_t *dstlen, ringbuf_t *rb, const char **message);
 int callback_read_ringbuf(const char *src,
                           size_t srclen,
