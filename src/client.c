@@ -238,6 +238,9 @@ cleanup:
 }
 
 int main(int argc, const char *argv[]) {
+    const char *message;
+    int rc = EXIT_SUCCESS;
+
     if (argc < 2) {
         fprintf(stderr, "Usage: %s <server-addr> [input-device] [output-device]\n", argv[0]);
         return EXIT_FAILURE;
@@ -247,7 +250,7 @@ int main(int argc, const char *argv[]) {
     const char *outdev = argc >= 4 ? argv[3] : NULL;
     uint16_t port = DEFAULT_PORT;
 
-    const char *message;
+    log_init();
     if (socket_init(&message)) {
         log_fatal("Failed to initialize socket: %s", message);
         goto fail;
@@ -268,7 +271,6 @@ int main(int argc, const char *argv[]) {
     char addrbuf[64];
     const char *addr = strsockaddr_r(sa, socklen, addrbuf, sizeof(addrbuf));
 
-    int rc = EXIT_SUCCESS;
     char buf[RINGBUF_SIZE];
     audio_stream_params_t params = DEFAULT_AUDIO_STREAM_PARAMS(APPLICATION_NAME);
     while (running && rc == EXIT_SUCCESS)

@@ -3,7 +3,7 @@
 
 #include <stdarg.h>
 
-enum {
+enum log_level {
     LOG_TRACE,
     LOG_DEBUG,
     LOG_INFO,
@@ -14,6 +14,8 @@ enum {
 
 #define LOG_LEVEL LOG_INFO
 
+void log_init();
+void log_set_level(int level);
 void log_write(int level, const char *file, int line, const char *fmt, ...);
 
 #define log_trace(...) log_write(LOG_TRACE, __FILE__, __LINE__, __VA_ARGS__)

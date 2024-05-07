@@ -289,6 +289,7 @@ int main() {
     const char *message;
     int rc = EXIT_SUCCESS;
 
+    log_init();
     if (socket_init(&message)) {
         log_fatal("Failed to initialize socket: %s", message);
         return EXIT_FAILURE;
