@@ -25,7 +25,7 @@
 
 static pool_t pool;
 static socket_t sock = SOCKET_UNDEFINED;
-static atomic_bool running = false;
+static atomic_bool running = true;
 static atomic_bool client_removed = false;
 static const audio_stream_params_t params = DEFAULT_AUDIO_STREAM_PARAMS(APPLICATION_NAME);
 
@@ -45,7 +45,7 @@ typedef struct {
     atomic_bool removed;
     atomic_bool running;
     socklen_t socklen;
-    atomic_ulong timer;
+    time_t timer;
     struct sockaddr *sa;
     OpusEncoder *enc;
     OpusDecoder *dec;
@@ -68,7 +68,7 @@ static audio_callback_result_t on_error(const char *message, void *userdata) {
 static audio_callback_result_t on_record(const void *src, size_t srclen, void *userdata) {
     const char *message;
     client_t *c = userdata;
-    if ((uint64_t)time(NULL) - c->timer > STREAM_TIMEOUT_SECONDS) {
+    if (time(NULL) - c->timer > STREAM_TIMEOUT_SECONDS) {
         log_info("%s Client timeout", c->addr);
         c->removed = true;
         client_removed = true;
@@ -127,7 +127,7 @@ static int client_init(client_t *c,
     c->stream = audio_stream_new(params);
     c->rb = ringbuf_init(c->ringbuf, sizeof(c->ringbuf));
 
-    time((time_t *)&c->timer);
+    time(&c->timer);
     strsockaddr_r(sa, socklen, c->addr, sizeof(c->addr));
 
     assert(c->socklen >= sizeof(struct sockaddr));
@@ -317,15 +317,15 @@ int main() {
     }
     log_info("Socket listening at %s", strsockaddr(sa, socklen));
 
-    running = true;
     signal(SIGINT, on_signal);
+    socket_set_timeout(sock, 1, &message);
 
     char buf[SOCKET_BUFSIZE];
     packet_client_header_t hdr;
     while (running) {
         socklen = sizeof(sin6);
         int res = recvfrom(sock, buf, sizeof(buf), 0, sa, &socklen);
-        if (res < 0) {
+        if (res < 0 && socket_errno() != SOCKERR_TIMEOUT) {
             log_fatal("Failed to receive packet: %s", socket_strerror());
             goto fail;
         }
@@ -348,7 +348,7 @@ int main() {
         client_t *client = clients[hdr.idx];
         if (!client)
             continue;
-        time((time_t *)&client->timer);
+        time(&client->timer);
 
         switch (hdr.type) {
         case PACKET_TYPE_DATA:

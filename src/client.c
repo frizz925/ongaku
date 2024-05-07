@@ -15,10 +15,13 @@
 #define APPLICATION_NAME "Ongaku"
 #define RINGBUF_SIZE 65536
 #define SOCKET_BUFSIZE 32768
+#define STREAM_TIMEOUT_SECONDS 30
 #define HEARTBEAT_INTERVAL_SECONDS 15
+#define HANDSHAKE_RETRY 5
 
 typedef struct {
     uint8_t idx;
+    time_t timer;
     OpusEncoder *enc;
     OpusDecoder *dec;
     ringbuf_t *rb;
@@ -36,7 +39,6 @@ static void on_signal(int sig) {
     log_debug("Received signal: %s", strsignal(sig));
 #endif
     running = false;
-    socket_self_signal(sock);
 }
 
 static void send_heartbeat(socket_t sock, uint8_t idx) {
@@ -53,6 +55,11 @@ static audio_callback_result_t on_error(const char *message, void *userdata) {
 static audio_callback_result_t on_record(const void *src, size_t srclen, void *userdata) {
     const char *message;
     context_t *ctx = userdata;
+    if (time(NULL) - ctx->timer > STREAM_TIMEOUT_SECONDS) {
+        running = false;
+        return AUDIO_STREAM_COMPLETE;
+    }
+
     char *ptr = ctx->buf;
     char *tail = ctx->buf + sizeof(ctx->buf);
 
@@ -102,11 +109,7 @@ static int application_loop(const char *indev,
     int rc = EXIT_SUCCESS;
     const char *message;
     audio_stream_t *stream = NULL;
-    context_t ctx = {
-        .dec = NULL,
-        .rb = rb,
-        .params = params,
-    };
+    context_t ctx = {.rb = rb, .params = params};
 
     int err;
     ctx.enc = opus_encoder_create(params->sample_rate, params->channels, OPUS_APPLICATION_RESTRICTED_LOWDELAY, &err);
@@ -119,11 +122,16 @@ static int application_loop(const char *indev,
         log_fatal("Failed to create Opus decoder: %s", opus_strerror(err));
         goto fail;
     }
+    time(&ctx.timer);
 
     log_info("Connecting to server %s", addr);
     sock = socket_open(sa->sa_family, &message);
     if (sock < 0) {
         log_fatal("Failed to create socket: %s", message);
+        goto fail;
+    }
+    if (socket_set_timeout(sock, 5, &message)) {
+        log_fatal("Failed to set socket timeout: %s", message);
         goto fail;
     }
     if (connect(sock, sa, socklen)) {
@@ -132,26 +140,40 @@ static int application_loop(const char *indev,
     }
 
     char buf[SOCKET_BUFSIZE] = HANDSHAKE_MAGIC_STRING;
-    if (send(sock, buf, HANDSHAKE_MAGIC_STRING_LEN, 0) < 0) {
-        log_fatal("Failed to send handshake packet: %s", socket_strerror());
-        goto fail;
-    }
     size_t buflen = sizeof(buf);
-    int res = recv(sock, buf, buflen, 0);
-    if (res < 0) {
-        log_fatal("Failed to receive handshake packet: %s", socket_strerror());
-        goto fail;
-    }
+    int handshake_success = 0;
+    for (int i = 0; i < HANDSHAKE_RETRY; i++) {
+        if (send(sock, buf, HANDSHAKE_MAGIC_STRING_LEN, 0) < 0) {
+            log_fatal("Failed to send handshake packet: %s", socket_strerror());
+            goto fail;
+        }
+        int res = recv(sock, buf, buflen, 0);
+        if (res < 0) {
+            if (socket_errno() != SOCKERR_TIMEOUT) {
+                log_fatal("Failed to receive handshake packet: %s", socket_strerror());
+                goto fail;
+            }
+            continue;
+        }
 
-    char *ptr = buf + packet_handshake_check(buf, res);
-    char *tail = buf + res;
-    if (ptr == buf) {
-        log_fatal("Invalid handshake packet received");
-    } else if (ptr == tail) {
-        log_fatal("Missing client index");
+        char *ptr = buf + packet_handshake_check(buf, res);
+        char *tail = buf + res;
+        if (ptr == buf) {
+            log_error("Invalid handshake packet received");
+            continue;
+        } else if (ptr == tail) {
+            log_error("Missing client index");
+            continue;
+        }
+
+        ctx.idx = *ptr++;
+        handshake_success = 1;
+        break;
+    }
+    if (!handshake_success) {
+        log_fatal("Failed to complete handshake after %d retries", HANDSHAKE_RETRY);
         goto fail;
     }
-    ctx.idx = *ptr++;
     log_info("Handshake packet received. Client index: %d", ctx.idx);
 
     stream = audio_stream_new(params);
@@ -172,19 +194,23 @@ static int application_loop(const char *indev,
         goto fail;
     }
 
-    signal(SIGINT, on_signal);
+    socket_set_timeout(sock, 1, &message);
 
     time_t timer = time(NULL);
     while (running) {
         if (time(NULL) - timer > HEARTBEAT_INTERVAL_SECONDS) {
             send_heartbeat(sock, ctx.idx);
-            timer = time(NULL);
+            time(&timer);
         }
+
         int res = recv(sock, buf, buflen, 0);
-        if (res < 0) {
+        if (res < 0 && socket_errno() != SOCKERR_TIMEOUT) {
             log_fatal("Failed to receive packet: %s", socket_strerror());
             break;
-        } else if (res < 1)
+        }
+        time((time_t *)&ctx.timer);
+
+        if (res < 1)
             continue;
 
         const char *ptr = buf;
@@ -233,6 +259,8 @@ cleanup:
 
     if (ctx.dec)
         opus_decoder_destroy(ctx.dec);
+    if (ctx.enc)
+        opus_encoder_destroy(ctx.enc);
 
     return rc;
 }
@@ -270,6 +298,8 @@ int main(int argc, const char *argv[]) {
 
     char addrbuf[64];
     const char *addr = strsockaddr_r(sa, socklen, addrbuf, sizeof(addrbuf));
+
+    signal(SIGINT, on_signal);
 
     char buf[RINGBUF_SIZE];
     audio_stream_params_t params = DEFAULT_AUDIO_STREAM_PARAMS(APPLICATION_NAME);
