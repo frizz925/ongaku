@@ -15,9 +15,7 @@
 #define APPLICATION_NAME "Ongaku"
 
 #define MAX_CLIENTS 64
-#define RINGBUF_SIZE 65536
 #define SOCKET_BUFSIZE 32768
-#define STREAM_BUFSIZE 65536
 #define STREAM_NAME_MAXLEN 128
 #define STREAM_TIMEOUT_SECONDS 30
 
@@ -49,9 +47,7 @@ typedef struct {
     audio_stream_t *stream;
     ringbuf_t *rb;
     char addr[64];
-    char buf[STREAM_BUFSIZE];
-    char sendbuf[SOCKET_BUFSIZE];
-    char ringbuf[RINGBUF_SIZE];
+    char buf[SOCKET_BUFSIZE];
 } client_t;
 
 static client_t *clients[MAX_CLIENTS] = {0};
@@ -72,8 +68,8 @@ static audio_callback_result_t on_record(const void *src, size_t srclen, void *u
         return AUDIO_STREAM_COMPLETE;
     }
 
-    char *ptr = c->sendbuf;
-    char *tail = c->sendbuf + sizeof(c->sendbuf);
+    char *ptr = c->buf;
+    char *tail = c->buf + sizeof(c->buf);
     *ptr++ = PACKET_TYPE_DATA;
 
     int res = callback_write_record(src, srclen, &params, c->enc, ptr, tail - ptr, &message);
@@ -83,7 +79,7 @@ static audio_callback_result_t on_record(const void *src, size_t srclen, void *u
     }
     ptr += res;
 
-    if (sendto(sock, c->sendbuf, ptr - c->sendbuf, 0, c->sa, c->socklen) < 0) {
+    if (sendto(sock, c->buf, ptr - c->buf, 0, c->sa, c->socklen) < 0) {
         log_error("%s Failed to send audio frame: %s", c->addr, socket_strerror());
         return AUDIO_STREAM_ABORT;
     }
@@ -121,7 +117,7 @@ static int client_init(client_t *c,
     c->socklen = socklen;
     c->sa = malloc_copy(sa, socklen);
     c->stream = audio_stream_new(params);
-    c->rb = ringbuf_init(c->ringbuf, sizeof(c->ringbuf));
+    c->rb = ringbuf_new(8 * audio_stream_frame_bufsize(params));
 
     time(&c->timer);
     strsockaddr_r(sa, socklen, c->addr, sizeof(c->addr));
@@ -175,6 +171,8 @@ static void client_deinit(client_t *c) {
         audio_stream_free(c->stream);
     if (c->enc)
         opus_encoder_destroy(c->enc);
+    if (c->rb)
+        ringbuf_free(c->rb);
     if (c->sa)
         free(c->sa);
 
@@ -212,9 +210,9 @@ static client_t *add_client(const struct sockaddr *sa, socklen_t socklen, const 
         goto fail;
     }
 
-    memcpy(c->sendbuf, HANDSHAKE_MAGIC_STRING, HANDSHAKE_MAGIC_STRING_LEN);
-    c->sendbuf[HANDSHAKE_MAGIC_STRING_LEN] = c->idx;
-    if (sendto(sock, c->sendbuf, HANDSHAKE_MAGIC_STRING_LEN + 1, 0, c->sa, c->socklen) < 0) {
+    memcpy(c->buf, HANDSHAKE_MAGIC_STRING, HANDSHAKE_MAGIC_STRING_LEN);
+    c->buf[HANDSHAKE_MAGIC_STRING_LEN] = c->idx;
+    if (sendto(sock, c->buf, HANDSHAKE_MAGIC_STRING_LEN + 1, 0, c->sa, c->socklen) < 0) {
         log_error("%s Failed to send handshake response: %s", c->addr, socket_strerror());
         goto fail;
     }
@@ -264,7 +262,7 @@ static void handle_handshake(const struct sockaddr *sa, socklen_t socklen) {
 
 static void handle_data(client_t *c, const char *buf, size_t buflen) {
     const char *message;
-    int res = callback_read_ringbuf(buf, buflen, c->buf, sizeof(c->buf), &params, c->dec, c->rb, &message);
+    int res = callback_read_ringbuf(buf, buflen, &params, c->dec, c->rb, &message);
     if (res < 0)
         log_error("%s Handling data packet error: %s", c->addr, message);
 }

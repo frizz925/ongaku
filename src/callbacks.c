@@ -1,7 +1,3 @@
-#ifndef _WIN32 /* Only windows provide min(a,b) macro so far */
-#include "util.h"
-#endif
-
 #include "callbacks.h"
 #include "protocol.h"
 
@@ -49,12 +45,11 @@ int callback_read_playback(void *dst, size_t *dstlen, ringbuf_t *rb, const char 
 
 int callback_read_ringbuf(const char *src,
                           size_t srclen,
-                          char *buf,
-                          size_t buflen,
                           const audio_stream_params_t *params,
                           OpusDecoder *dec,
                           ringbuf_t *rb,
                           const char **message) {
+    void *buf;
     const char *ptr = src;
     const char *tail = src + srclen;
 
@@ -68,14 +63,16 @@ int callback_read_ringbuf(const char *src,
         return -1;
     }
 
-    size_t rblen = ringbuf_available(rb);
     size_t frame_size = audio_stream_frame_size(params);
-    size_t frame_count = min(buflen, rblen) / frame_size;
+    size_t buflen = ringbuf_writeptr(rb, &buf, hdr.frames * frame_size);
+    size_t frame_count = buflen / frame_size;
     int res = opus_decode(dec, (unsigned char *)ptr, hdr.size, (opus_int16 *)buf, frame_count, 0);
     if (res < 0) {
         *message = opus_strerror(res);
         return -1;
     }
+
     size_t len = res * frame_size;
-    return ringbuf_write(rb, buf, len);
+    ringbuf_advance_writeptr(rb, len);
+    return len;
 }

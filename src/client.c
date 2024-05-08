@@ -12,7 +12,6 @@
 #include <time.h>
 
 #define APPLICATION_NAME "Ongaku"
-#define RINGBUF_SIZE 65536
 #define SOCKET_BUFSIZE 32768
 #define STREAM_TIMEOUT_SECONDS 30
 #define HEARTBEAT_INTERVAL_SECONDS 15
@@ -91,9 +90,8 @@ static audio_callback_result_t on_playback(void *dst, size_t *dstlen, void *user
 }
 
 static void handle_data(context_t *ctx, const void *buf, size_t buflen) {
-    static char tmp[SOCKET_BUFSIZE];
     const char *message;
-    int res = callback_read_ringbuf(buf, buflen, tmp, sizeof(tmp), ctx->params, ctx->dec, ctx->rb, &message);
+    int res = callback_read_ringbuf(buf, buflen, ctx->params, ctx->dec, ctx->rb, &message);
     if (res < 0)
         log_error("Handling data packet error: %s", message);
 }
@@ -277,6 +275,9 @@ int main(int argc, const char *argv[]) {
     const char *outdev = argc >= 4 ? argv[3] : NULL;
     uint16_t port = DEFAULT_PORT;
 
+    audio_stream_params_t params = DEFAULT_AUDIO_STREAM_PARAMS(APPLICATION_NAME);
+    ringbuf_t *rb = ringbuf_new(8 * audio_stream_frame_bufsize(&params));
+
     log_init();
     if (socket_init(&message)) {
         log_fatal("Failed to initialize socket: %s", message);
@@ -300,10 +301,10 @@ int main(int argc, const char *argv[]) {
 
     signal(SIGINT, on_signal);
 
-    char buf[RINGBUF_SIZE];
-    audio_stream_params_t params = DEFAULT_AUDIO_STREAM_PARAMS(APPLICATION_NAME);
-    while (running && rc == EXIT_SUCCESS)
-        rc = application_loop(indev, outdev, sa, socklen, addr, &params, ringbuf_init(buf, sizeof(buf)));
+    while (running && rc == EXIT_SUCCESS) {
+        ringbuf_clear(rb);
+        rc = application_loop(indev, outdev, sa, socklen, addr, &params, rb);
+    }
     goto cleanup;
 
 fail:
@@ -318,6 +319,7 @@ cleanup:
         log_fatal("Failed to terminate socket: %s", message);
         rc = EXIT_FAILURE;
     }
+    ringbuf_free(rb);
 
     return rc;
 }
