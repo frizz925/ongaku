@@ -29,8 +29,18 @@ if host_machine.system() == 'windows'
     common_deps += ws2_32
 endif
 
-core = library('ongakucore', sources: core_src, dependencies: core_deps)
-audio = library('ongakuaudio', sources: audio_src, dependencies: audio_deps)
+core = library(
+    'ongakucore',
+    sources: core_src,
+    dependencies: core_deps,
+    install: true,
+)
+audio = library(
+    'ongakuaudio',
+    sources: audio_src,
+    dependencies: audio_deps,
+    install: true,
+)
 common_libs = [core, audio]
 
 if host_machine.system() == 'linux'
@@ -47,6 +57,7 @@ executable(
     sources: common_src + 'src/server.c',
     dependencies: common_deps,
     link_with: common_libs,
+    install: true,
 )
 
 executable(
@@ -54,4 +65,5 @@ executable(
     sources: common_src + 'src/client.c',
     dependencies: common_deps,
     link_with: common_libs,
+    install: true,
 )
