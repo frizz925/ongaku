@@ -9,7 +9,7 @@
 #define FRAME_DURATION 20
 #define FRAME_BUFFER_DURATION 2500
 
-#define SAMPLE_FORMAT float
+#define SAMPLE_FORMAT int16_t
 #define SAMPLE_SIZE sizeof(SAMPLE_FORMAT)
 
 typedef enum audio_format {
@@ -33,7 +33,7 @@ typedef struct {
         .sample_rate = SAMPLE_RATE, \
         .sample_size = SAMPLE_SIZE, \
         .frame_duration = FRAME_DURATION, \
-        .sample_format = AUDIO_FORMAT_F32, \
+        .sample_format = AUDIO_FORMAT_S16, \
     };
 
 typedef struct audio_stream audio_stream_t;
@@ -54,10 +54,11 @@ typedef enum audio_callback_result {
 enum {
     STREAMCFG_FLAG_INPUT = 1,
     STREAMCFG_FLAG_OUTPUT = 1 << 1,
-    STREAMCFG_FLAG_OPUS = 1 << 2,
+    STREAMCFG_FLAG_CODEC_OPUS = 1 << 2,
+    STREAMCFG_FLAG_SAMPLE_F32 = 1 << 3,
 };
 
-#define DEFAULT_STREAMCFG_FLAGS (STREAMCFG_FLAG_INPUT | STREAMCFG_FLAG_OUTPUT | STREAMCFG_FLAG_OPUS)
+#define DEFAULT_STREAMCFG_FLAGS (STREAMCFG_FLAG_INPUT | STREAMCFG_FLAG_OUTPUT | STREAMCFG_FLAG_CODEC_OPUS)
 
 typedef audio_callback_result_t (*audio_error_callback_t)(const char *message, void *userdata);
 typedef audio_callback_result_t (*audio_playback_callback_t)(void *data, size_t *len, void *userdata);

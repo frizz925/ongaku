@@ -23,7 +23,6 @@ static pool_t pool;
 static socket_t sock = SOCKET_UNDEFINED;
 static atomic_bool running = true;
 static atomic_bool client_removed = false;
-static const audio_stream_params_t params = DEFAULT_AUDIO_STREAM_PARAMS(APPLICATION_NAME);
 
 static void on_signal(int sig) {
 #ifdef _WIN32
@@ -42,6 +41,7 @@ typedef struct {
     int flags;
     socklen_t socklen;
     time_t timer;
+    audio_stream_params_t params;
     struct sockaddr *sa;
     OpusEncoder *enc;
     OpusDecoder *dec;
@@ -73,7 +73,7 @@ static audio_callback_result_t on_record(const void *src, size_t srclen, void *u
     char *tail = c->buf + sizeof(c->buf);
     *ptr++ = PACKET_TYPE_DATA;
 
-    int res = callback_write_record(src, srclen, &params, c->enc, ptr, tail - ptr, &message);
+    int res = callback_write_record(src, srclen, &c->params, c->enc, ptr, tail - ptr, &message);
     if (res < 0) {
         log_error("%s Failed to write data packet: %s", c->addr, message);
         return AUDIO_STREAM_ABORT;
@@ -98,20 +98,25 @@ static audio_callback_result_t on_playback(void *dst, size_t *dstlen, void *user
     return AUDIO_STREAM_CONTINUE;
 }
 
-static int client_init(client_t *c,
-                       const audio_stream_params_t *params,
-                       const struct sockaddr *sa,
-                       socklen_t socklen,
-                       int flags,
-                       const char **message) {
-    if (flags & STREAMCFG_FLAG_OPUS) {
+static int client_init(client_t *c, const struct sockaddr *sa, socklen_t socklen, int flags, const char **message) {
+    audio_stream_params_t params = DEFAULT_AUDIO_STREAM_PARAMS(APPLICATION_NAME);
+    if (flags & STREAMCFG_FLAG_SAMPLE_F32) {
+        params.sample_size = sizeof(float);
+        params.sample_format = AUDIO_FORMAT_F32;
+    } else {
+        params.sample_size = sizeof(opus_int16);
+        params.sample_format = AUDIO_FORMAT_S16;
+    }
+    memcpy(&c->params, &params, sizeof(params));
+
+    if (flags & STREAMCFG_FLAG_CODEC_OPUS) {
         int err;
-        c->enc = opus_encoder_create(params->sample_rate, params->channels, OPUS_APPLICATION_AUDIO, &err);
+        c->enc = opus_encoder_create(params.sample_rate, params.channels, OPUS_APPLICATION_AUDIO, &err);
         if (err) {
             *message = opus_strerror(err);
             return -1;
         }
-        c->dec = opus_decoder_create(params->sample_rate, params->channels, &err);
+        c->dec = opus_decoder_create(params.sample_rate, params.channels, &err);
         if (err) {
             *message = opus_strerror(err);
             return -1;
@@ -124,8 +129,8 @@ static int client_init(client_t *c,
     c->flags = flags;
     c->socklen = socklen;
     c->sa = malloc_copy(sa, socklen);
-    c->stream = audio_stream_new(params);
-    c->rb = ringbuf_new(FRAME_BUFFER_DURATION * audio_stream_sample_count(params));
+    c->stream = audio_stream_new(&c->params);
+    c->rb = ringbuf_new(FRAME_BUFFER_DURATION * audio_stream_sample_count(&c->params));
 
     time(&c->timer);
     strsockaddr_r(sa, socklen, c->addr, sizeof(c->addr));
@@ -215,7 +220,7 @@ static client_t *add_client(const struct sockaddr *sa, socklen_t socklen, const 
         c->assigned = true;
     }
 
-    if (client_init(c, &params, sa, socklen, flags, &message)) {
+    if (client_init(c, sa, socklen, flags, &message)) {
         log_error("%s Failed to initialize client: %s", message);
         goto fail;
     }
@@ -278,7 +283,7 @@ static void handle_handshake(const struct sockaddr *sa, socklen_t socklen, const
 
 static void handle_data(client_t *c, const char *buf, size_t buflen) {
     const char *message;
-    int res = callback_read_ringbuf(buf, buflen, &params, c->dec, c->rb, &message);
+    int res = callback_read_ringbuf(buf, buflen, &c->params, c->dec, c->rb, &message);
     if (res < 0)
         log_error("%s Handling data packet error: %s", c->addr, message);
 }

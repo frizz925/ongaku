@@ -115,7 +115,7 @@ static int application_loop(int flags,
         .dec = NULL,
     };
 
-    if (flags & STREAMCFG_FLAG_OPUS) {
+    if (flags & STREAMCFG_FLAG_CODEC_OPUS) {
         int err;
         ctx.enc = opus_encoder_create(params->sample_rate, params->channels, OPUS_APPLICATION_AUDIO, &err);
         if (err) {
@@ -281,13 +281,14 @@ cleanup:
 
 noreturn static void usage(int rc) {
     fprintf(stderr,
-            "Usage: ongaku-client [-pdiox] <server-addr>\n"
+            "Usage: ongaku-client [-pdiofx] <server-addr>\n"
             "   -h              print this help\n"
             "   -p port         use different port to connect to the server\n"
             "   -d direction    specifiy direction of the stream: in, out, duplex\n"
             "   -i device       use input device name\n"
             "   -o device       use output device name\n"
-            "   -x              disable Opus codec\n");
+            "   -f              use 32-bit float sample format\n"
+            "   -x              disable Opus codec (will cause significantly higher network bandwidth)\n");
     exit(EXIT_FAILURE);
 }
 
@@ -302,7 +303,7 @@ int main(int argc, char *argv[]) {
     int flags = DEFAULT_STREAMCFG_FLAGS;
 
     int opt;
-    while ((opt = getopt(argc, argv, "hp:d:i:o:x")) != -1) {
+    while ((opt = getopt(argc, argv, "hp:d:i:o:fx")) != -1) {
         switch (opt) {
         case 'h':
             usage(EXIT_SUCCESS);
@@ -321,8 +322,11 @@ int main(int argc, char *argv[]) {
         case 'o':
             outdev = optarg;
             break;
+        case 'f':
+            flags |= STREAMCFG_FLAG_SAMPLE_F32;
+            break;
         case 'x':
-            flags &= ~STREAMCFG_FLAG_OPUS;
+            flags &= ~STREAMCFG_FLAG_CODEC_OPUS;
             break;
         default:
             usage(EXIT_FAILURE);
@@ -333,7 +337,13 @@ int main(int argc, char *argv[]) {
     const char *host = argv[optind];
 
     audio_stream_params_t params = DEFAULT_AUDIO_STREAM_PARAMS(APPLICATION_NAME);
-    ringbuf_t *rb = ringbuf_new(FRAME_BUFFER_DURATION * audio_stream_sample_count(&params));
+    if (flags & STREAMCFG_FLAG_SAMPLE_F32) {
+        params.sample_size = sizeof(float);
+        params.sample_format = AUDIO_FORMAT_F32;
+    } else {
+        params.sample_size = sizeof(opus_int16);
+        params.sample_format = AUDIO_FORMAT_S16;
+    }
 
     if (socket_init(&message)) {
         log_fatal("Failed to initialize socket: %s", message);
@@ -357,10 +367,13 @@ int main(int argc, char *argv[]) {
 
     signal(SIGINT, on_signal);
 
+    ringbuf_t *rb = ringbuf_new(FRAME_BUFFER_DURATION * audio_stream_sample_count(&params));
     while (running && rc == EXIT_SUCCESS) {
         ringbuf_clear(rb);
         rc = application_loop(flags, indev, outdev, sa, socklen, addr, &params, rb);
     }
+    ringbuf_free(rb);
+
     goto cleanup;
 
 fail:
@@ -375,7 +388,6 @@ cleanup:
         log_fatal("Failed to terminate socket: %s", message);
         rc = EXIT_FAILURE;
     }
-    ringbuf_free(rb);
 
     return rc;
 }
