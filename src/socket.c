@@ -1,10 +1,8 @@
 #include "socket.h"
-#include "util.h"
 
 #include <assert.h>
 #include <stdio.h>
 #include <string.h>
-#include <sys/_types/_socklen_t.h>
 
 #ifdef _WIN32
 

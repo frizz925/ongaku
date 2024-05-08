@@ -12,7 +12,6 @@
 #include <stdbool.h>
 #include <stdio.h>
 #include <stdlib.h>
-#include <sys/_types/_socklen_t.h>
 #include <time.h>
 
 #define APPLICATION_NAME "Ongaku"
