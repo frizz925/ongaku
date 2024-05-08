@@ -12,22 +12,30 @@ int callback_write_record(const void *src,
     size_t frame_count = srclen / frame_size;
     char *tail = buf + buflen;
 
-    packet_data_header_t hdr;
+    packet_data_header_t hdr = {.frames = frame_count};
     size_t hdrlen = sizeof(hdr);
     char *hptr = buf;
-
     char *ptr = hptr + hdrlen;
-    int res = opus_encode(enc, (opus_int16 *)src, frame_count, (unsigned char *)ptr, tail - ptr);
-    if (res < 0) {
-        *message = opus_strerror(res);
-        return -1;
+
+    int res;
+    if (enc) {
+        res = opus_encode(enc, (opus_int16 *)src, frame_count, (unsigned char *)ptr, tail - ptr);
+        if (res < 0) {
+            *message = opus_strerror(res);
+            return -1;
+        }
+    } else {
+        if (buflen < srclen) {
+            *message = "Buffer too small!";
+            return -1;
+        }
+        memcpy(buf, src, srclen);
+        res = srclen;
     }
     tail = ptr + res;
-
     hdr.size = res;
-    hdr.frames = frame_count;
-    packet_data_header_write(hptr, ptr - hptr, &hdr);
 
+    packet_data_header_write(hptr, ptr - hptr, &hdr);
     return tail - buf;
 }
 
@@ -62,6 +70,9 @@ int callback_read_ringbuf(const char *src,
         *message = "Invalid data size";
         return -1;
     }
+
+    if (!dec) /* No Opus decoder, just write directly */
+        return ringbuf_write(rb, ptr, hdr.size);
 
     size_t frame_size = audio_stream_frame_size(params);
     size_t buflen = ringbuf_writeptr(rb, &buf, hdr.frames * frame_size);
