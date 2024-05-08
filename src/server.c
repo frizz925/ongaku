@@ -264,13 +264,13 @@ static void remove_client(client_t *c) {
 }
 
 static void handle_handshake(const struct sockaddr *sa, socklen_t socklen, const char *buf, size_t buflen) {
+    const char *addr = strsockaddr(sa, socklen);
     packet_config_t cfg = {.flags = DEFAULT_STREAMCFG_FLAGS};
     const char *ptr = buf;
     const char *tail = buf + buflen;
     ptr += packet_config_read(ptr, tail - ptr, &cfg);
-    log_debug("%s flags=%d", cfg.flags);
+    log_debug("%s flags=%d", addr, cfg.flags);
 
-    const char *addr = strsockaddr(sa, socklen);
     client_t *client = add_client(sa, socklen, addr, cfg.flags);
     if (client)
         log_info("%s Handshake success. Client index: %d", addr, client->idx);
