@@ -281,7 +281,7 @@ cleanup:
 
 noreturn static void usage(int rc) {
     fprintf(stderr,
-            "Usage: ongaku-client [-pdiox] <server-addr> [direction]\n"
+            "Usage: ongaku-client [-pdiox] <server-addr>\n"
             "   -h              print this help\n"
             "   -p port         use different port to connect to the server\n"
             "   -d direction    specifiy direction of the stream: in, out, duplex\n"
