@@ -111,7 +111,7 @@ static int client_init(client_t *c, const struct sockaddr *sa, socklen_t socklen
 
     if (flags & STREAMCFG_FLAG_CODEC_OPUS) {
         int err;
-        c->enc = opus_encoder_create(params.sample_rate, params.channels, OPUS_APPLICATION_AUDIO, &err);
+        c->enc = opus_encoder_create(params.sample_rate, params.channels, OPUS_APPLICATION, &err);
         if (err) {
             *message = opus_strerror(err);
             return -1;
