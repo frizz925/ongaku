@@ -149,7 +149,7 @@ static int application_loop(const char *indev,
         }
         int res = recv(sock, buf, buflen, 0);
         if (res < 0) {
-            if (socket_errno() != SOCKERR_TIMEOUT) {
+            if (!socket_error_timeout()) {
                 log_fatal("Failed to receive handshake packet: %s", socket_strerror());
                 goto fail;
             }
@@ -204,7 +204,7 @@ static int application_loop(const char *indev,
         }
 
         int res = recv(sock, buf, buflen, 0);
-        if (res < 0 && socket_errno() != SOCKERR_TIMEOUT) {
+        if (res < 0 && !socket_error_timeout()) {
             log_fatal("Failed to receive packet: %s", socket_strerror());
             break;
         }

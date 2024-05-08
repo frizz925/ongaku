@@ -12,8 +12,6 @@
 #include <windows.h>
 #include <ws2tcpip.h>
 
-#define SOCKERR_TIMEOUT WSAETIMEDOUT
-
 typedef SOCKET socket_t;
 typedef int socklen_t;
 typedef u_long in_addr_t;
@@ -31,8 +29,8 @@ typedef int optval_t;
 
 #endif
 
-int socket_errno();
 const char *socket_strerror();
+int socket_error_timeout();
 
 int socket_init(const char **message);
 socket_t socket_open(int af, const char **message);

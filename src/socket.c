@@ -9,10 +9,6 @@
 
 #define ERRMSG_EAFNOSUPPORT "Unsupported socket family"
 
-int socket_errno() {
-    return WSAGetLastError();
-}
-
 const char *socket_strerror() {
     static char msg[256];
     msg[0] = '\0';
@@ -24,6 +20,10 @@ const char *socket_strerror() {
                   sizeof(msg),
                   NULL);
     return msg;
+}
+
+int socket_error_timeout() {
+    return WSAGetLastError() == WSAETIMEDOUT;
 }
 
 int socket_init(const char **message) {
@@ -61,12 +61,12 @@ int socket_terminate(const char **message) {
 
 #define ERRMSG_EAFNOSUPPORT strerror(EAFNOSUPPORT);
 
-int socket_errno() {
-    return errno;
-}
-
 const char *socket_strerror() {
     return strerror(errno);
+}
+
+int socket_error_timeout() {
+    return errno == EAGAIN || errno == EWOULDBLOCK;
 }
 
 int socket_init(const char **message) {

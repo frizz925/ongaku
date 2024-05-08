@@ -325,7 +325,7 @@ int main() {
     while (running) {
         socklen = sizeof(sin6);
         int res = recvfrom(sock, buf, sizeof(buf), 0, sa, &socklen);
-        if (res < 0 && socket_errno() != SOCKERR_TIMEOUT) {
+        if (res < 0 && !socket_error_timeout()) {
             log_fatal("Failed to receive packet: %s", socket_strerror());
             goto fail;
         }
