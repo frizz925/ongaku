@@ -28,8 +28,6 @@ typedef struct {
     uint16_t frames;
 } packet_data_header_t;
 
-void socket_self_signal(socket_t listener);
-
 size_t packet_handshake_write(char *buf, size_t len);
 size_t packet_client_header_write(char *buf, size_t buflen, const packet_client_header_t *src);
 size_t packet_data_header_write(char *buf, size_t buflen, const packet_data_header_t *src);
