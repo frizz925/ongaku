@@ -9,7 +9,7 @@
 #define FRAME_DURATION 20
 #define FRAME_BUFFER_DURATION 2500
 
-#define SAMPLE_FORMAT int16_t
+#define SAMPLE_FORMAT float
 #define SAMPLE_SIZE sizeof(SAMPLE_FORMAT)
 
 typedef enum audio_format {
@@ -33,6 +33,7 @@ typedef struct {
         .sample_rate = SAMPLE_RATE, \
         .sample_size = SAMPLE_SIZE, \
         .frame_duration = FRAME_DURATION, \
+        .sample_format = AUDIO_FORMAT_F32, \
     };
 
 typedef struct audio_stream audio_stream_t;

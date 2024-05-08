@@ -19,7 +19,9 @@ int callback_write_record(const void *src,
 
     int res;
     if (enc) {
-        res = opus_encode(enc, (opus_int16 *)src, frame_count, (unsigned char *)ptr, tail - ptr);
+        res = params->sample_format == AUDIO_FORMAT_F32
+                  ? opus_encode_float(enc, (float *)src, frame_count, (unsigned char *)ptr, tail - ptr)
+                  : opus_encode(enc, (opus_int16 *)src, frame_count, (unsigned char *)ptr, tail - ptr);
         if (res < 0) {
             *message = opus_strerror(res);
             return -1;
@@ -83,7 +85,9 @@ int callback_read_ringbuf(const char *src,
     }
 
     size_t frame_count = buflen / frame_size;
-    int res = opus_decode(dec, (unsigned char *)ptr, hdr.size, (opus_int16 *)buf, frame_count, 0);
+    int res = params->sample_format == AUDIO_FORMAT_F32
+                  ? opus_decode_float(dec, (unsigned char *)ptr, hdr.size, (float *)buf, frame_count, 0)
+                  : opus_decode(dec, (unsigned char *)ptr, hdr.size, (opus_int16 *)buf, frame_count, 0);
     if (res < 0) {
         *message = opus_strerror(res);
         return -1;

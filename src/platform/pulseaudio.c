@@ -222,11 +222,7 @@ void audio_stream_init(audio_stream_t *stream, const audio_stream_params_t *para
     assert(mainloop != NULL);
     memset(stream, 0, audio_stream_sizeof());
 
-#if SAMPLE_TYPE == uint16_t
-    stream->sample_spec.format = PA_SAMPLE_S16LE;
-#elif SAMPLE_TYPE == float
-    stream->sample_spec.format = PA_SAMPLE_FLOAT32LE;
-#endif
+    stream->sample_spec.format = params->sample_format == AUDIO_FORMAT_F32 ? PA_SAMPLE_FLOAT32LE : PA_SAMPLE_S16LE;
     stream->sample_spec.channels = params->channels;
     stream->sample_spec.rate = params->sample_rate;
 
