@@ -13,7 +13,7 @@
 
 #define STREAM_CONTEXT_FIELDS \
     atomic_bool running; \
-    const char *dev; \
+    int direction; \
     pa_stream *pa_stream; \
     audio_stream_t *stream; \
     audio_error_callback_t error_cb; \
@@ -143,25 +143,25 @@ static inline void mainloop_unlock_all() {
 }
 
 static void context_init(stream_context_t *context,
-                         const char *dev,
+                         int direction,
                          const char *name,
                          audio_error_callback_t error_cb,
                          void *userdata,
                          const char **message) {
     audio_stream_t *stream = context->stream;
-    context->dev = dev;
+    context->direction = direction;
     context->pa_stream = pa_stream_new(stream->pa_context, name, &stream->sample_spec, NULL);
     context->error_cb = error_cb;
     context->userdata = userdata;
 }
 
-static int context_start(stream_context_t *ctx, int direction, const char **message) {
+static int context_start(stream_context_t *ctx, const char **message) {
     if (ctx->running || !ctx->pa_stream)
         return 0;
     int err =
-        direction == STREAM_DIRECTION_IN
-            ? pa_stream_connect_record(ctx->pa_stream, ctx->dev, &ctx->stream->buffer_attr, stream_flags)
-            : pa_stream_connect_playback(ctx->pa_stream, ctx->dev, &ctx->stream->buffer_attr, stream_flags, NULL, NULL);
+        ctx->direction == STREAM_DIRECTION_IN
+            ? pa_stream_connect_record(ctx->pa_stream, NULL, &ctx->stream->buffer_attr, stream_flags)
+            : pa_stream_connect_playback(ctx->pa_stream, NULL, &ctx->stream->buffer_attr, stream_flags, NULL, NULL);
     if (err) {
         *message = pa_strerror(err);
         return -1;
@@ -185,7 +185,6 @@ static int context_stop(stream_context_t *ctx, const char **message) {
 static void context_deinit(stream_context_t *context) {
     if (context->pa_stream)
         pa_stream_unref(context->pa_stream);
-    context->dev = NULL;
     context->pa_stream = NULL;
     context->error_cb = NULL;
     context->userdata = NULL;
@@ -284,7 +283,7 @@ int audio_stream_open_record(audio_stream_t *stream,
                              void *userdata,
                              const char **message) {
     mainloop_lock();
-    context_init((stream_context_t *)&stream->record, dev, name, error_cb, userdata, message);
+    context_init((stream_context_t *)&stream->record, STREAM_DIRECTION_IN, name, error_cb, userdata, message);
     pa_stream_set_read_callback(stream->record.pa_stream, on_audio_read, &stream->record);
     stream->record.record_cb = record_cb;
     mainloop_unlock();
@@ -299,7 +298,7 @@ int audio_stream_open_playback(audio_stream_t *stream,
                                void *userdata,
                                const char **message) {
     mainloop_lock();
-    context_init((stream_context_t *)&stream->playback, dev, name, error_cb, userdata, message);
+    context_init((stream_context_t *)&stream->playback, STREAM_DIRECTION_OUT, name, error_cb, userdata, message);
     pa_stream_set_write_callback(stream->playback.pa_stream, on_audio_write, &stream->playback);
     stream->playback.playback_cb = playback_cb;
     mainloop_unlock();
@@ -307,9 +306,9 @@ int audio_stream_open_playback(audio_stream_t *stream,
 }
 
 int audio_stream_start(audio_stream_t *stream, const char **message) {
-    if (context_start((stream_context_t *)&stream->record, STREAM_DIRECTION_IN, message))
+    if (context_start((stream_context_t *)&stream->record, message))
         return -1;
-    if (context_start((stream_context_t *)&stream->playback, STREAM_DIRECTION_OUT, message))
+    if (context_start((stream_context_t *)&stream->playback, message))
         return -1;
     return 0;
 }
