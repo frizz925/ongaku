@@ -334,9 +334,7 @@ int audio_stream_close_playback(audio_stream_t *stream, const char **message) {
 int audio_stream_disconnect(audio_stream_t *stream, const char **message) {
     if (!stream->connected)
         return 0;
-    mainloop_lock();
     pa_context_disconnect(stream->pa_context);
-    mainloop_unlock();
     stream->connected = false;
     return 0;
 }
