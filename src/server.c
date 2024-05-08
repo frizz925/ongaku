@@ -72,7 +72,6 @@ static audio_callback_result_t on_record(const void *src, size_t srclen, void *u
         log_info("%s Client timeout", c->addr);
         c->removed = true;
         client_removed = true;
-        socket_self_signal(sock);
         return AUDIO_STREAM_COMPLETE;
     }
 
