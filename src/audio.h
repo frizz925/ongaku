@@ -1,6 +1,8 @@
 #ifndef _AUDIO_H
 #define _AUDIO_H
 
+#include <opus/opus.h>
+
 #include <stddef.h>
 #include <stdint.h>
 
@@ -9,8 +11,10 @@
 #define FRAME_DURATION 20
 #define FRAME_BUFFER_DURATION 1000
 
-#define SAMPLE_FORMAT int16_t
+#define SAMPLE_FORMAT opus_int16
 #define SAMPLE_SIZE sizeof(SAMPLE_FORMAT)
+
+#define OPUS_APPLICATION OPUS_APPLICATION_RESTRICTED_LOWDELAY
 
 typedef enum audio_format {
     AUDIO_FORMAT_S16,

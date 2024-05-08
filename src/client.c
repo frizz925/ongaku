@@ -117,7 +117,7 @@ static int application_loop(int flags,
 
     if (flags & STREAMCFG_FLAG_CODEC_OPUS) {
         int err;
-        ctx.enc = opus_encoder_create(params->sample_rate, params->channels, OPUS_APPLICATION_AUDIO, &err);
+        ctx.enc = opus_encoder_create(params->sample_rate, params->channels, OPUS_APPLICATION, &err);
         if (err) {
             log_fatal("Failed to create Opus encoder: %s", opus_strerror(err));
             goto fail;
