@@ -333,7 +333,7 @@ int main(int argc, char *argv[]) {
     const char *host = argv[optind];
 
     audio_stream_params_t params = DEFAULT_AUDIO_STREAM_PARAMS(APPLICATION_NAME);
-    ringbuf_t *rb = ringbuf_new(8 * audio_stream_frame_bufsize(&params));
+    ringbuf_t *rb = ringbuf_new(FRAME_BUFFER_DURATION * audio_stream_sample_count(&params));
 
     if (socket_init(&message)) {
         log_fatal("Failed to initialize socket: %s", message);

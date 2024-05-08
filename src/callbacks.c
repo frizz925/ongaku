@@ -75,7 +75,13 @@ int callback_read_ringbuf(const char *src,
         return ringbuf_write(rb, ptr, hdr.size);
 
     size_t frame_size = audio_stream_frame_size(params);
-    size_t buflen = ringbuf_writeptr(rb, &buf, hdr.frames * frame_size);
+    size_t reqlen = hdr.frames * frame_size;
+    size_t buflen = ringbuf_writeptr(rb, &buf, reqlen);
+    if (buflen < reqlen) {
+        *message = "Ring buffer overflow!";
+        return -1;
+    }
+
     size_t frame_count = buflen / frame_size;
     int res = opus_decode(dec, (unsigned char *)ptr, hdr.size, (opus_int16 *)buf, frame_count, 0);
     if (res < 0) {
