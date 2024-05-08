@@ -11,8 +11,15 @@ lib_src = [
 ]
 lib_deps = []
 if host_machine.system() == 'linux'
+    pulse = compiler.find_library('pulse')
     lib_src += 'src/platform/pulseaudio.c'
-    lib_deps += compiler.find_library('pulse')
+    lib_deps += pulse
+
+    executable(
+        'ongaku-pulse',
+        sources: ['src/log.c', 'src/pulse.c'],
+        dependencies: pulse,
+    )
 else
     lib_src += 'src/platform/portaudio.c'
     lib_deps += compiler.find_library('portaudio')
@@ -33,15 +40,6 @@ lib = library(
     install: true,
 )
 common_libs = [lib]
-
-if host_machine.system() == 'linux'
-    pulse = compiler.find_library('pulse')
-    executable(
-        'ongaku-pulse',
-        sources: ['src/log.c', 'src/pulse.c'],
-        dependencies: pulse,
-    )
-endif
 
 executable(
     'ongaku-server',
