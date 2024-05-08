@@ -18,10 +18,11 @@ int callback_write_record(const void *src,
     char *ptr = hptr + hdrlen;
 
     int res;
+    buflen = tail - ptr;
     if (enc) {
         res = params->sample_format == AUDIO_FORMAT_F32
-                  ? opus_encode_float(enc, (float *)src, frame_count, (unsigned char *)ptr, tail - ptr)
-                  : opus_encode(enc, (opus_int16 *)src, frame_count, (unsigned char *)ptr, tail - ptr);
+                  ? opus_encode_float(enc, (float *)src, frame_count, (unsigned char *)ptr, buflen)
+                  : opus_encode(enc, (opus_int16 *)src, frame_count, (unsigned char *)ptr, buflen);
         if (res < 0) {
             *message = opus_strerror(res);
             return -1;
@@ -31,7 +32,7 @@ int callback_write_record(const void *src,
             *message = "Buffer too small!";
             return -1;
         }
-        memcpy(buf, src, srclen);
+        memcpy(ptr, src, srclen);
         res = srclen;
     }
     tail = ptr + res;
