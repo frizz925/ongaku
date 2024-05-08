@@ -4,6 +4,7 @@
 #include <assert.h>
 #include <stdio.h>
 #include <string.h>
+#include <sys/_types/_socklen_t.h>
 
 #ifdef _WIN32
 
@@ -120,23 +121,41 @@ int socket_set_timeout(socket_t sock, double timeout, const char **message) {
     return 0;
 }
 
-void sockaddr_ipv4(struct sockaddr *sa, size_t socklen, in_addr_t addr, uint16_t port) {
-    assert(socklen >= sizeof(struct sockaddr));
+int socket_bind(socket_t sock, const struct sockaddr *sa, socklen_t socklen, const char **message) {
+    if (bind(sock, sa, socklen)) {
+        *message = socket_strerror();
+        return -1;
+    }
+    return 0;
+}
+
+int socket_connect(socket_t sock, const struct sockaddr *sa, socklen_t socklen, const char **message) {
+    if (connect(sock, sa, socklen)) {
+        *message = socket_strerror();
+        return -1;
+    }
+    return 0;
+}
+
+void sockaddr_ipv4(struct sockaddr *sa, socklen_t *socklen, in_addr_t addr, uint16_t port) {
+    assert(*socklen >= sizeof(struct sockaddr_in));
     struct sockaddr_in *sin = (struct sockaddr_in *)sa;
     sin->sin_family = AF_INET;
     sin->sin_addr.s_addr = addr;
     sin->sin_port = htons(port);
+    *socklen = sizeof(struct sockaddr_in);
 }
 
-void sockaddr_ipv6(struct sockaddr *sa, size_t socklen, struct in6_addr addr, uint16_t port) {
-    assert(socklen >= sizeof(struct sockaddr));
+void sockaddr_ipv6(struct sockaddr *sa, socklen_t *socklen, struct in6_addr addr, uint16_t port) {
+    assert(*socklen >= sizeof(struct sockaddr_in6));
     struct sockaddr_in6 *sin6 = (struct sockaddr_in6 *)sa;
     sin6->sin6_family = AF_INET6;
     sin6->sin6_addr = addr;
     sin6->sin6_port = htons(port);
+    *socklen = sizeof(struct sockaddr_in6);
 }
 
-int sockaddr_string(struct sockaddr *sa, size_t socklen, const char *name, uint16_t port, const char **message) {
+int sockaddr_string(struct sockaddr *sa, socklen_t *socklen, const char *name, uint16_t port, const char **message) {
     char serv[8];
     struct addrinfo *ai;
 
@@ -147,12 +166,15 @@ int sockaddr_string(struct sockaddr *sa, size_t socklen, const char *name, uint1
         return -1;
     }
 
-    memcpy(sa, ai->ai_addr, min(socklen, ai->ai_addrlen));
+    assert(*socklen >= ai->ai_addrlen);
+    memcpy(sa, ai->ai_addr, ai->ai_addrlen);
+    *socklen = ai->ai_addrlen;
     freeaddrinfo(ai);
+
     return 0;
 }
 
-int sockaddr_any(struct sockaddr *sa, size_t socklen, int af, uint16_t port, const char **message) {
+int sockaddr_any(struct sockaddr *sa, socklen_t *socklen, int af, uint16_t port, const char **message) {
     switch (af) {
     case AF_INET:
         sockaddr_ipv4(sa, socklen, INADDR_ANY, port);
@@ -165,7 +187,7 @@ int sockaddr_any(struct sockaddr *sa, size_t socklen, int af, uint16_t port, con
     return -1;
 }
 
-int sockaddr_loopback(struct sockaddr *sa, size_t socklen, int af, uint16_t port, const char **message) {
+int sockaddr_loopback(struct sockaddr *sa, socklen_t *socklen, int af, uint16_t port, const char **message) {
     switch (af) {
     case AF_INET:
         sockaddr_ipv4(sa, socklen, htonl(INADDR_LOOPBACK), port);

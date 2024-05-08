@@ -12,6 +12,7 @@
 #include <stdbool.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <sys/_types/_socklen_t.h>
 #include <time.h>
 
 #define APPLICATION_NAME "Ongaku"
@@ -302,7 +303,7 @@ int main() {
     struct sockaddr_in6 sin6;
     struct sockaddr *sa = (struct sockaddr *)&sin6;
     socklen_t socklen = sizeof(sin6);
-    sockaddr_ipv4(sa, socklen, INADDR_ANY, DEFAULT_PORT);
+    sockaddr_ipv4(sa, &socklen, INADDR_ANY, DEFAULT_PORT);
     if ((sock = socket_open(sa->sa_family, &message)) < 0) {
         log_fatal("Failed to create socket: %s", message);
         goto fail;
@@ -310,8 +311,8 @@ int main() {
     optval_t optval = 0;
     if (setsockopt(sock, SOL_SOCKET, SO_REUSEADDR, &optval, sizeof(optval)))
         log_error("Failed to disable SO_REUSEADDR: %s", socket_strerror());
-    if (bind(sock, sa, socklen)) {
-        log_fatal("Failed to bind socket: %s", socket_strerror());
+    if (socket_bind(sock, sa, socklen, &message)) {
+        log_fatal("Failed to bind socket: %s", message);
         goto fail;
     }
     log_info("Socket listening at %s", strsockaddr(sa, socklen));
@@ -358,7 +359,6 @@ int main() {
             break;
         }
     }
-
     goto cleanup;
 
 fail:

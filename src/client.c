@@ -134,7 +134,7 @@ static int application_loop(const char *indev,
         log_fatal("Failed to set socket timeout: %s", message);
         goto fail;
     }
-    if (connect(sock, sa, socklen)) {
+    if (socket_connect(sock, sa, socklen, &message)) {
         log_fatal("Failed to connect to server: %s", message);
         goto fail;
     }
@@ -291,7 +291,7 @@ int main(int argc, const char *argv[]) {
     struct sockaddr_in6 sin6;
     struct sockaddr *sa = (struct sockaddr *)&sin6;
     socklen_t socklen = sizeof(sin6);
-    if (sockaddr_string(sa, socklen, host, port, &message)) {
+    if (sockaddr_string(sa, &socklen, host, port, &message)) {
         log_fatal("Invalid address %s: %s", argv[1], message);
         goto fail;
     }
