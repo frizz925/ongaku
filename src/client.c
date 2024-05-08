@@ -276,7 +276,7 @@ int main(int argc, const char *argv[]) {
     uint16_t port = DEFAULT_PORT;
 
     audio_stream_params_t params = DEFAULT_AUDIO_STREAM_PARAMS(APPLICATION_NAME);
-    ringbuf_t *rb = ringbuf_new(8 * audio_stream_frame_bufsize(&params));
+    ringbuf_t *rb = ringbuf_new(FRAME_BUFFER_DURATION * audio_stream_sample_count(&params));
 
     log_init();
     if (socket_init(&message)) {

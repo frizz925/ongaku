@@ -62,12 +62,11 @@ size_t ringbuf_available(ringbuf_t *rb) {
 }
 
 size_t ringbuf_readptr(ringbuf_t *rb, const void **ptr) {
-    if (rb->empty) {
-        *ptr = NULL;
+    *ptr = NULL;
+    if (rb->empty)
         return 0;
-    }
     *ptr = rb->buf + rb->ridx;
-    return ((rb->ridx <= rb->widx) ? rb->widx : rb->tidx) - rb->ridx;
+    return ((rb->ridx < rb->widx) ? rb->widx : rb->tidx) - rb->ridx;
 }
 
 size_t ringbuf_writeptr(ringbuf_t *rb, void **ptr, size_t size) {
@@ -91,27 +90,32 @@ size_t ringbuf_writeptr(ringbuf_t *rb, void **ptr, size_t size) {
 void ringbuf_advance_readptr(ringbuf_t *rb, size_t off) {
     if (off <= 0)
         return;
-    if (rb->ridx + off >= rb->tidx)
-        rb->ridx = 0;
+    size_t ridx = rb->ridx;
+    if (ridx + off >= rb->tidx)
+        ridx = 0;
     else
-        rb->ridx += off;
+        ridx += off;
+    if (ridx == rb->widx)
+        rb->empty = true;
+    rb->ridx = ridx;
     if (rb->full)
         rb->full = false;
-    if (rb->ridx == rb->widx)
-        rb->empty = true;
 }
+
 void ringbuf_advance_writeptr(ringbuf_t *rb, size_t off) {
     if (off <= 0)
         return;
-    if (rb->widx + off >= rb->cap) {
-        rb->widx = 0;
+    size_t widx = rb->widx;
+    if (widx + off >= rb->cap) {
+        widx = 0;
         rb->tidx = rb->cap;
     } else
-        rb->widx += off;
+        widx += off;
+    if (rb->ridx == widx)
+        rb->full = true;
+    rb->widx = widx;
     if (rb->empty)
         rb->empty = false;
-    if (rb->ridx == rb->widx)
-        rb->full = true;
 }
 
 size_t ringbuf_read(ringbuf_t *rb, void *dst, size_t len) {

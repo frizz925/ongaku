@@ -7,6 +7,7 @@
 #define CHANNELS 2
 #define SAMPLE_RATE 48000
 #define FRAME_DURATION 20
+#define FRAME_BUFFER_DURATION 1000
 
 #define SAMPLE_FORMAT int16_t
 #define SAMPLE_SIZE sizeof(SAMPLE_FORMAT)
@@ -53,6 +54,7 @@ typedef audio_callback_result_t (*audio_error_callback_t)(const char *message, v
 typedef audio_callback_result_t (*audio_playback_callback_t)(void *data, size_t *len, void *userdata);
 typedef audio_callback_result_t (*audio_record_callback_t)(const void *data, size_t len, void *userdata);
 
+size_t audio_stream_sample_count(const audio_stream_params_t *params);
 size_t audio_stream_frame_count(const audio_stream_params_t *params);
 size_t audio_stream_frame_size(const audio_stream_params_t *params);
 size_t audio_stream_frame_bufsize(const audio_stream_params_t *params);

@@ -117,7 +117,7 @@ static int client_init(client_t *c,
     c->socklen = socklen;
     c->sa = malloc_copy(sa, socklen);
     c->stream = audio_stream_new(params);
-    c->rb = ringbuf_new(8 * audio_stream_frame_bufsize(params));
+    c->rb = ringbuf_new(FRAME_BUFFER_DURATION * audio_stream_sample_count(params));
 
     time(&c->timer);
     strsockaddr_r(sa, socklen, c->addr, sizeof(c->addr));
