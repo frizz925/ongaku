@@ -10,8 +10,6 @@
 #include <signal.h>
 #include <stdatomic.h>
 #include <stdbool.h>
-#include <stdio.h>
-#include <stdlib.h>
 #include <time.h>
 
 #define APPLICATION_NAME "Ongaku"
@@ -36,7 +34,6 @@ static void on_signal(int sig) {
     log_debug("Received signal: %s", strsignal(sig));
 #endif
     running = false;
-    socket_self_signal(sock);
 }
 
 typedef struct {
