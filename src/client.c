@@ -9,7 +9,9 @@
 #include <stdbool.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <stdnoreturn.h>
 #include <time.h>
+#include <unistd.h>
 
 #define APPLICATION_NAME "Ongaku"
 #define SOCKET_BUFSIZE 32768
@@ -60,7 +62,6 @@ static audio_callback_result_t on_record(const void *src, size_t srclen, void *u
 
     char *ptr = ctx->buf;
     char *tail = ctx->buf + sizeof(ctx->buf);
-
     packet_client_header_t hdr = {.idx = ctx->idx, .type = PACKET_TYPE_DATA};
     ptr += packet_client_header_write(ptr, tail - ptr, &hdr);
 
@@ -96,7 +97,8 @@ static void handle_data(context_t *ctx, const void *buf, size_t buflen) {
         log_error("Handling data packet error: %s", message);
 }
 
-static int application_loop(const char *indev,
+static int application_loop(int flags,
+                            const char *indev,
                             const char *outdev,
                             struct sockaddr *sa,
                             socklen_t socklen,
@@ -106,20 +108,26 @@ static int application_loop(const char *indev,
     int rc = EXIT_SUCCESS;
     const char *message;
     audio_stream_t *stream = NULL;
-    context_t ctx = {.rb = rb, .params = params};
+    context_t ctx = {
+        .rb = rb,
+        .params = params,
+        .enc = NULL,
+        .dec = NULL,
+    };
 
-    int err;
-    ctx.enc = opus_encoder_create(params->sample_rate, params->channels, OPUS_APPLICATION_RESTRICTED_LOWDELAY, &err);
-    if (err) {
-        log_fatal("Failed to create Opus encoder: %s", opus_strerror(err));
-        goto fail;
+    if (flags & STREAMCFG_FLAG_OPUS) {
+        int err;
+        ctx.enc = opus_encoder_create(params->sample_rate, params->channels, OPUS_APPLICATION_AUDIO, &err);
+        if (err) {
+            log_fatal("Failed to create Opus encoder: %s", opus_strerror(err));
+            goto fail;
+        }
+        ctx.dec = opus_decoder_create(params->sample_rate, params->channels, &err);
+        if (err) {
+            log_fatal("Failed to create Opus decoder: %s", opus_strerror(err));
+            goto fail;
+        }
     }
-    ctx.dec = opus_decoder_create(params->sample_rate, params->channels, &err);
-    if (err) {
-        log_fatal("Failed to create Opus decoder: %s", opus_strerror(err));
-        goto fail;
-    }
-    time(&ctx.timer);
 
     log_info("Connecting to server %s", addr);
     sock = socket_open(sa->sa_family, &message);
@@ -138,9 +146,15 @@ static int application_loop(const char *indev,
 
     char buf[SOCKET_BUFSIZE] = HANDSHAKE_MAGIC_STRING;
     size_t buflen = sizeof(buf);
+
+    char *ptr = buf + HANDSHAKE_MAGIC_STRING_LEN;
+    char *tail = buf + buflen;
+    packet_config_t config = {.flags = flags};
+    ptr += packet_config_write(ptr, tail - ptr, &config);
+
     int handshake_success = 0;
     for (int i = 0; i < HANDSHAKE_RETRY; i++) {
-        if (send(sock, buf, HANDSHAKE_MAGIC_STRING_LEN, 0) < 0) {
+        if (send(sock, buf, ptr - buf, 0) < 0) {
             log_fatal("Failed to send handshake packet: %s", socket_strerror());
             goto fail;
         }
@@ -153,8 +167,8 @@ static int application_loop(const char *indev,
             continue;
         }
 
-        char *ptr = buf + packet_handshake_check(buf, res);
-        char *tail = buf + res;
+        ptr = buf + packet_handshake_check(buf, res);
+        tail = buf + res;
         if (ptr == buf) {
             log_error("Invalid handshake packet received");
             continue;
@@ -172,17 +186,20 @@ static int application_loop(const char *indev,
         goto fail;
     }
     log_info("Handshake packet received. Client index: %d", ctx.idx);
+    time(&ctx.timer);
 
     stream = audio_stream_new(params);
     if (audio_stream_connect(stream, &message)) {
         log_fatal("Failed to connect stream: %s", message);
         goto fail;
     }
-    if (audio_stream_open_record(stream, indev, addr, on_record, on_error, &ctx, &message)) {
+    if (flags & STREAMCFG_FLAG_OUTPUT &&
+        audio_stream_open_record(stream, indev, addr, on_record, on_error, &ctx, &message)) {
         log_fatal("Failed to open record stream: %s", message);
         goto fail;
     }
-    if (audio_stream_open_playback(stream, outdev, addr, on_playback, on_error, &ctx, &message)) {
+    if (flags & STREAMCFG_FLAG_INPUT &&
+        audio_stream_open_playback(stream, outdev, addr, on_playback, on_error, &ctx, &message)) {
         log_fatal("Failed to open playback stream: %s", message);
         goto fail;
     }
@@ -262,23 +279,62 @@ cleanup:
     return rc;
 }
 
-int main(int argc, const char *argv[]) {
+noreturn static void usage(int rc) {
+    fprintf(stderr,
+            "Usage: ongaku-client [-pdiox] <server-addr> [direction]\n"
+            "   -h              print this help\n"
+            "   -p port         use different port to connect to the server\n"
+            "   -d direction    specifiy direction of the stream: in, out, duplex\n"
+            "   -i device       use input device name\n"
+            "   -o device       use output device name\n"
+            "   -x              disable Opus codec\n");
+    exit(EXIT_FAILURE);
+}
+
+int main(int argc, char *argv[]) {
+    log_init();
+
     const char *message;
     int rc = EXIT_SUCCESS;
-
-    if (argc < 2) {
-        fprintf(stderr, "Usage: %s <server-addr> [input-device] [output-device]\n", argv[0]);
-        return EXIT_FAILURE;
-    }
-    const char *host = argv[1];
-    const char *indev = argc >= 3 ? argv[2] : NULL;
-    const char *outdev = argc >= 4 ? argv[3] : NULL;
+    const char *indev = NULL;
+    const char *outdev = NULL;
     uint16_t port = DEFAULT_PORT;
+    int flags = DEFAULT_STREAMCFG_FLAGS;
+
+    int opt;
+    while ((opt = getopt(argc, argv, "hp:d:i:o:x")) != -1) {
+        switch (opt) {
+        case 'h':
+            usage(EXIT_SUCCESS);
+        case 'p':
+            port = atoi(optarg);
+            break;
+        case 'd':
+            if (strncasecmp(optarg, "in", 2) == 0)
+                flags &= ~STREAMCFG_FLAG_OUTPUT;
+            else if (strncasecmp(optarg, "out", 3) == 0)
+                flags &= ~STREAMCFG_FLAG_INPUT;
+            break;
+        case 'i':
+            indev = optarg;
+            break;
+        case 'o':
+            outdev = optarg;
+            break;
+        case 'x':
+            flags &= ~STREAMCFG_FLAG_OPUS;
+            break;
+        default:
+            usage(EXIT_FAILURE);
+        }
+    }
+    if (optind >= argc)
+        usage(EXIT_FAILURE);
+    const char *host = argv[optind];
 
     audio_stream_params_t params = DEFAULT_AUDIO_STREAM_PARAMS(APPLICATION_NAME);
     ringbuf_t *rb = ringbuf_new(FRAME_BUFFER_DURATION * audio_stream_sample_count(&params));
 
-    log_init();
     if (socket_init(&message)) {
         log_fatal("Failed to initialize socket: %s", message);
         goto fail;
@@ -303,7 +359,7 @@ int main(int argc, const char *argv[]) {
 
     while (running && rc == EXIT_SUCCESS) {
         ringbuf_clear(rb);
-        rc = application_loop(indev, outdev, sa, socklen, addr, &params, rb);
+        rc = application_loop(flags, indev, outdev, sa, socklen, addr, &params, rb);
     }
     goto cleanup;
 

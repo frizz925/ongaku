@@ -57,6 +57,7 @@ int socket_terminate(const char **message) {
 
 #include <errno.h>
 #include <netdb.h>
+#include <unistd.h>
 
 #define ERRMSG_EAFNOSUPPORT strerror(EAFNOSUPPORT);
 

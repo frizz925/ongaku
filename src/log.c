@@ -23,9 +23,10 @@ void log_init() {
     if (env_name) {
         for (int level = LOG_TRACE; log_level_names[level]; level++) {
             const char *name = log_level_names[level];
-            if (strncasecmp(name, env_name, strlen(name)))
-                continue;
-            log_level = level;
+            if (strncasecmp(name, env_name, strlen(name)) == 0) {
+                log_level = level;
+                break;
+            }
         }
     }
 
@@ -43,7 +44,7 @@ void log_set_level(int level) {
 }
 
 void log_write(int level, const char *file, int line, const char *fmt, ...) {
-    if (level < LOG_LEVEL)
+    if (level < log_level)
         return;
 
     char msg[4096];

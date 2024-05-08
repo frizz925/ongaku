@@ -22,7 +22,6 @@ typedef char optval_t;
 #include <arpa/inet.h>
 #include <netinet/in.h>
 #include <sys/socket.h>
-#include <unistd.h>
 
 typedef int socket_t;
 typedef int optval_t;

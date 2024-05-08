@@ -39,6 +39,7 @@ typedef struct {
     bool assigned;
     atomic_bool removed;
     atomic_bool running;
+    int flags;
     socklen_t socklen;
     time_t timer;
     struct sockaddr *sa;
@@ -101,19 +102,26 @@ static int client_init(client_t *c,
                        const audio_stream_params_t *params,
                        const struct sockaddr *sa,
                        socklen_t socklen,
+                       int flags,
                        const char **message) {
-    int err;
-    c->enc = opus_encoder_create(params->sample_rate, params->channels, OPUS_APPLICATION_RESTRICTED_LOWDELAY, &err);
-    if (err) {
-        *message = opus_strerror(err);
-        return -1;
-    }
-    c->dec = opus_decoder_create(params->sample_rate, params->channels, &err);
-    if (err) {
-        *message = opus_strerror(err);
-        return -1;
+    if (flags & STREAMCFG_FLAG_OPUS) {
+        int err;
+        c->enc = opus_encoder_create(params->sample_rate, params->channels, OPUS_APPLICATION_AUDIO, &err);
+        if (err) {
+            *message = opus_strerror(err);
+            return -1;
+        }
+        c->dec = opus_decoder_create(params->sample_rate, params->channels, &err);
+        if (err) {
+            *message = opus_strerror(err);
+            return -1;
+        }
+    } else {
+        c->enc = NULL;
+        c->dec = NULL;
     }
 
+    c->flags = flags;
     c->socklen = socklen;
     c->sa = malloc_copy(sa, socklen);
     c->stream = audio_stream_new(params);
@@ -132,9 +140,11 @@ static int client_start(client_t *c, const char *indev, const char *outdev, cons
         return 0;
     if (audio_stream_connect(c->stream, message))
         goto fail;
-    if (audio_stream_open_record(c->stream, indev, c->addr, on_record, on_error, c, message))
+    if (c->flags & STREAMCFG_FLAG_INPUT &&
+        audio_stream_open_record(c->stream, indev, c->addr, on_record, on_error, c, message))
         goto disconnect_fail;
-    if (audio_stream_open_playback(c->stream, outdev, c->addr, on_playback, on_error, c, message))
+    if (c->flags & STREAMCFG_FLAG_OUTPUT &&
+        audio_stream_open_playback(c->stream, outdev, c->addr, on_playback, on_error, c, message))
         goto disconnect_fail;
     if (audio_stream_start(c->stream, message))
         goto disconnect_fail;
@@ -187,7 +197,7 @@ static void client_deinit(client_t *c) {
     c->addr[0] = '\0';
 }
 
-static client_t *add_client(const struct sockaddr *sa, socklen_t socklen, const char *addr) {
+static client_t *add_client(const struct sockaddr *sa, socklen_t socklen, const char *addr, int flags) {
     static uint8_t client_idx = 0;
     const char *message;
 
@@ -205,7 +215,7 @@ static client_t *add_client(const struct sockaddr *sa, socklen_t socklen, const 
         c->assigned = true;
     }
 
-    if (client_init(c, &params, sa, socklen, &message)) {
+    if (client_init(c, &params, sa, socklen, flags, &message)) {
         log_error("%s Failed to initialize client: %s", message);
         goto fail;
     }
@@ -253,9 +263,15 @@ static void remove_client(client_t *c) {
     pool_put(&pool, c);
 }
 
-static void handle_handshake(const struct sockaddr *sa, socklen_t socklen) {
+static void handle_handshake(const struct sockaddr *sa, socklen_t socklen, const char *buf, size_t buflen) {
+    packet_config_t cfg = {.flags = DEFAULT_STREAMCFG_FLAGS};
+    const char *ptr = buf;
+    const char *tail = buf + buflen;
+    ptr += packet_config_read(ptr, tail - ptr, &cfg);
+    log_debug("%s flags=%d", cfg.flags);
+
     const char *addr = strsockaddr(sa, socklen);
-    client_t *client = add_client(sa, socklen, addr);
+    client_t *client = add_client(sa, socklen, addr, cfg.flags);
     if (client)
         log_info("%s Handshake success. Client index: %d", addr, client->idx);
 }
@@ -328,15 +344,15 @@ int main() {
         if (res <= 0)
             continue;
 
-        if (packet_handshake_check(buf, res)) {
-            handle_handshake(sa, socklen);
+        const char *ptr = buf + packet_handshake_check(buf, res);
+        const char *tail = buf + res;
+        if (ptr != buf) { /* Pointer sliding, this is a handshake packet */
+            handle_handshake(sa, socklen, ptr, tail - ptr);
             continue;
         }
 
-        const char *ptr = buf;
-        const char *tail = buf + res;
         ptr += packet_client_header_read(buf, res, &hdr);
-        if (ptr == buf) /* Pointer not moving indicates failed header read */
+        if (ptr == buf) /* Pointer not sliding indicates failed header read */
             continue;
 
         client_t *client = clients[hdr.idx];
