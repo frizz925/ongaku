@@ -45,15 +45,17 @@ int callback_write_record(const void *src,
     return tail - buf;
 }
 
-int callback_read_playback(void *dst, size_t *dstlen, ringbuf_t *rb, const char **message) {
-    size_t req = *dstlen;
-    if (ringbuf_remaining(rb) < req) {
+int callback_read_playback(void *dst, size_t *result, ringbuf_t *rb, const char **message) {
+    size_t dstlen = *result;
+    size_t size = ringbuf_size(rb);
+    size_t frames = dstlen / size;
+    if (ringbuf_remaining(rb) < frames) {
         SET_MESSAGE(message, "Ring buffer underflow!");
-        memset(dst, 0, req);
+        memset(dst, 0, frames * size);
         return 1;
     }
-    size_t len = ringbuf_read(rb, dst, req);
-    *dstlen = len;
+    size_t len = ringbuf_read(rb, dst, frames);
+    *result = len * size;
     return len;
 }
 
@@ -78,27 +80,22 @@ int callback_read_ringbuf(const char *src,
     }
 
     if (!dec) /* No Opus decoder, just write directly */
-        return ringbuf_write(rb, ptr, hdr.size);
+        return ringbuf_write(rb, ptr, hdr.frames);
 
-    size_t frame_size = audio_stream_frame_size(params);
-    size_t reqlen = hdr.frames * frame_size;
-    size_t buflen = ringbuf_writeptr(rb, &buf, reqlen);
-    if (buflen < reqlen) {
+    size_t frames = ringbuf_writeptr(rb, &buf, hdr.frames);
+    if (frames < hdr.frames) {
         SET_MESSAGE(message, "Ring buffer overflow!");
-        fprintf(stderr, "reqlen=%zu buflen=%zu\n", reqlen, buflen);
+        fprintf(stderr, "hdr.frames=%d frames=%zu\n", hdr.frames, frames);
         return -1;
     }
-
-    size_t frame_count = buflen / frame_size;
     int res = params->sample_format == AUDIO_FORMAT_F32
-                  ? opus_decode_float(dec, (unsigned char *)ptr, hdr.size, (float *)buf, frame_count, 0)
-                  : opus_decode(dec, (unsigned char *)ptr, hdr.size, (opus_int16 *)buf, frame_count, 0);
+                  ? opus_decode_float(dec, (unsigned char *)ptr, hdr.size, (float *)buf, frames, 0)
+                  : opus_decode(dec, (unsigned char *)ptr, hdr.size, (opus_int16 *)buf, frames, 0);
     if (res < 0) {
         SET_MESSAGE(message, opus_strerror(res));
         return -1;
     }
 
-    size_t len = res * frame_size;
-    ringbuf_advance_writeptr(rb, len);
-    return len;
+    ringbuf_advance_writeptr(rb, res);
+    return res;
 }
