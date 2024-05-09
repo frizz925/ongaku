@@ -1,17 +1,22 @@
 #ifndef _UTIL_H
 #define _UTIL_H
 
+#include <assert.h>
 #include <stddef.h>
 #include <stdlib.h>
 #include <string.h>
 
-#ifndef min
-#define min(a, b) (((a) < (b)) ? (a) : (b))
+#ifndef MIN
+#define MIN(a, b) (((a) < (b)) ? (a) : (b))
 #endif
 
-#ifndef max
-#define max(a, b) (((a) > (b)) ? (a) : (b))
+#ifndef MAX
+#define MAX(a, b) (((a) > (b)) ? (a) : (b))
 #endif
+
+#define SET_MESSAGE(ptr, message) \
+    if (ptr != NULL) \
+    *ptr = message
 
 static inline void *malloc_copy(const void *src, size_t len) {
     void *dst = malloc(len);

@@ -1,4 +1,5 @@
 #include "socket.h"
+#include "util.h"
 
 #include <assert.h>
 #include <stdio.h>
@@ -30,7 +31,7 @@ int socket_init(const char **message) {
     WSADATA wsaData;
     int err = WSAStartup(wVersionRequested, &wsaData);
     if (err) {
-        *message = socket_strerror();
+        SET_MESSAGE(message, socket_strerror());
         return -1;
     }
     return 0;
@@ -38,7 +39,7 @@ int socket_init(const char **message) {
 
 int socket_close(socket_t sock, const char **message) {
     if (closesocket(sock)) {
-        *message = socket_strerror();
+        SET_MESSAGE(message, socket_strerror());
         return -1;
     }
     return 0;
@@ -47,7 +48,7 @@ int socket_close(socket_t sock, const char **message) {
 int socket_terminate(const char **message) {
     int err = WSACleanup();
     if (err) {
-        *message = socket_strerror();
+        SET_MESSAGE(message, socket_strerror());
         return -1;
     }
     return 0;
@@ -75,7 +76,7 @@ int socket_init(const char **message) {
 
 int socket_close(socket_t sock, const char **message) {
     if (close(sock)) {
-        *message = socket_strerror();
+        SET_MESSAGE(message, socket_strerror());
         return -1;
     }
     return 0;
@@ -100,7 +101,7 @@ socket_t socket_open(int af, const char **message) {
 error:
     if (sock >= 0)
         close(sock);
-    *message = socket_strerror();
+    SET_MESSAGE(message, socket_strerror());
     return SOCKET_ERROR;
 }
 
@@ -114,7 +115,7 @@ int socket_set_timeout(socket_t sock, double timeout, const char **message) {
     };
 #endif
     if (setsockopt(sock, SOL_SOCKET, SO_RCVTIMEO, (optval_t *)&tv, sizeof(tv))) {
-        *message = socket_strerror();
+        SET_MESSAGE(message, socket_strerror());
         return -1;
     }
     return 0;
@@ -122,7 +123,7 @@ int socket_set_timeout(socket_t sock, double timeout, const char **message) {
 
 int socket_bind(socket_t sock, const struct sockaddr *sa, socklen_t socklen, const char **message) {
     if (bind(sock, sa, socklen)) {
-        *message = socket_strerror();
+        SET_MESSAGE(message, socket_strerror());
         return -1;
     }
     return 0;
@@ -130,7 +131,7 @@ int socket_bind(socket_t sock, const struct sockaddr *sa, socklen_t socklen, con
 
 int socket_connect(socket_t sock, const struct sockaddr *sa, socklen_t socklen, const char **message) {
     if (connect(sock, sa, socklen)) {
-        *message = socket_strerror();
+        SET_MESSAGE(message, socket_strerror());
         return -1;
     }
     return 0;
@@ -161,7 +162,7 @@ int sockaddr_string(struct sockaddr *sa, socklen_t *socklen, const char *name, u
     snprintf(serv, sizeof(serv), "%d", port);
     int err = getaddrinfo(name, serv, NULL, &ai);
     if (err) {
-        *message = gai_strerror(err);
+        SET_MESSAGE(message, gai_strerror(err));
         return -1;
     }
 
@@ -182,7 +183,7 @@ int sockaddr_any(struct sockaddr *sa, socklen_t *socklen, int af, uint16_t port,
         sockaddr_ipv6(sa, socklen, in6addr_any, port);
         return 0;
     }
-    *message = ERRMSG_EAFNOSUPPORT;
+    SET_MESSAGE(message, ERRMSG_EAFNOSUPPORT);
     return -1;
 }
 
@@ -195,7 +196,7 @@ int sockaddr_loopback(struct sockaddr *sa, socklen_t *socklen, int af, uint16_t 
         sockaddr_ipv6(sa, socklen, in6addr_loopback, port);
         return 0;
     }
-    *message = ERRMSG_EAFNOSUPPORT;
+    SET_MESSAGE(message, ERRMSG_EAFNOSUPPORT);
     return -1;
 }
 

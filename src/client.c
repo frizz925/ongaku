@@ -47,16 +47,10 @@ static void send_heartbeat(socket_t sock, uint8_t idx) {
         log_error("Failed to send heartbeat packet: %s", socket_strerror());
 }
 
-static audio_callback_result_t on_error(const char *message, void *userdata) {
-    log_error("Stream error: %s", message);
-    return AUDIO_STREAM_ABORT;
-}
-
 static audio_callback_result_t on_record(const void *src, size_t srclen, void *userdata) {
     const char *message;
     context_t *ctx = userdata;
     if (time(NULL) - ctx->timer > STREAM_TIMEOUT_SECONDS) {
-        running = false;
         return AUDIO_STREAM_COMPLETE;
     }
 
@@ -88,6 +82,14 @@ static audio_callback_result_t on_playback(void *dst, size_t *dstlen, void *user
         return AUDIO_STREAM_ABORT;
     }
     return AUDIO_STREAM_CONTINUE;
+}
+
+static void on_error(const char *message, void *userdata) {
+    log_error("Stream error: %s", message);
+}
+
+static void on_finished(void *userdata) {
+    running = false;
 }
 
 static void handle_data(context_t *ctx, const void *buf, size_t buflen) {
@@ -194,12 +196,12 @@ static int application_loop(int flags,
         goto fail;
     }
     if (flags & STREAMCFG_FLAG_OUTPUT &&
-        audio_stream_open_record(stream, indev, addr, on_record, on_error, &ctx, &message)) {
+        audio_stream_open_record(stream, indev, addr, on_record, on_error, on_finished, &ctx, &message)) {
         log_fatal("Failed to open record stream: %s", message);
         goto fail;
     }
     if (flags & STREAMCFG_FLAG_INPUT &&
-        audio_stream_open_playback(stream, outdev, addr, on_playback, on_error, &ctx, &message)) {
+        audio_stream_open_playback(stream, outdev, addr, on_playback, on_error, on_finished, &ctx, &message)) {
         log_fatal("Failed to open playback stream: %s", message);
         goto fail;
     }
@@ -367,7 +369,7 @@ int main(int argc, char *argv[]) {
 
     signal(SIGINT, on_signal);
 
-    ringbuf_t *rb = ringbuf_new(FRAME_BUFFER_DURATION * audio_stream_sample_count(&params));
+    ringbuf_t *rb = ringbuf_new(audio_stream_frame_bufsize(&params, FRAME_BUFFER_DURATION));
     while (running && rc == EXIT_SUCCESS) {
         ringbuf_clear(rb);
         rc = application_loop(flags, indev, outdev, sa, socklen, addr, &params, rb);

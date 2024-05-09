@@ -1,4 +1,5 @@
 #include "../audio.h"
+#include "../util.h"
 
 #include <pulse/pulseaudio.h>
 
@@ -18,6 +19,10 @@
     audio_stream_t *stream; \
     audio_error_callback_t error_cb; \
     void *userdata;
+
+#define STREAM_ERROR(ctx, message) \
+    if (ctx->error_cb != NULL) \
+        ctx->error_cb(message, ctx->userdata);
 
 static const pa_stream_flags_t stream_flags = PA_STREAM_ADJUST_LATENCY;
 static pa_threaded_mainloop *mainloop = NULL;
@@ -71,7 +76,7 @@ static void on_audio_read(pa_stream *stream, size_t nbytes, void *userdata) {
     record_context_t *ctx = userdata;
 
     if ((err = pa_stream_peek(stream, &data, &nbytes))) {
-        result = ctx->error_cb(pa_strerror(err), ctx->userdata);
+        STREAM_ERROR(ctx, pa_strerror(err));
         goto end;
     }
     if (nbytes <= 0)
@@ -79,14 +84,17 @@ static void on_audio_read(pa_stream *stream, size_t nbytes, void *userdata) {
     if (data)
         result = ctx->record_cb(data, nbytes, ctx->userdata);
     if (result == AUDIO_STREAM_CONTINUE && (err = pa_stream_drop(stream)) != 0)
-        result = ctx->error_cb(pa_strerror(err), ctx->userdata);
+        STREAM_ERROR(ctx, pa_strerror(err));
 
 end:
+    if (err != 0)
+        result = AUDIO_STREAM_ABORT;
+
     switch (result) {
     case AUDIO_STREAM_COMPLETE:
     case AUDIO_STREAM_ABORT:
         if (context_stop((stream_context_t *)ctx, &message))
-            ctx->error_cb(message, ctx->userdata);
+            STREAM_ERROR(ctx, message);
         break;
     case AUDIO_STREAM_CONTINUE:
         break;
@@ -101,19 +109,22 @@ static void on_audio_write(pa_stream *stream, size_t nbytes, void *userdata) {
     playback_context_t *ctx = (playback_context_t *)userdata;
 
     if ((err = pa_stream_begin_write(stream, &data, &nbytes))) {
-        result = ctx->error_cb(pa_strerror(err), ctx->userdata);
+        STREAM_ERROR(ctx, pa_strerror(err));
         goto end;
     }
     result = ctx->playback_cb(data, &nbytes, ctx->userdata);
     if (result == AUDIO_STREAM_CONTINUE && nbytes > 0) {
         if ((err = pa_stream_write(stream, data, nbytes, NULL, 0, PA_SEEK_RELATIVE)))
-            result = ctx->error_cb(pa_strerror(err), ctx->userdata);
+            STREAM_ERROR(ctx, pa_strerror(err));
     } else {
         if ((err = pa_stream_cancel_write(stream)))
-            result = ctx->error_cb(pa_strerror(err), ctx->userdata);
+            STREAM_ERROR(ctx, pa_strerror(err));
     }
 
 end:
+    if (err != 0)
+        result = AUDIO_STREAM_ABORT;
+
     switch (result) {
     case AUDIO_STREAM_COMPLETE:
     case AUDIO_STREAM_ABORT:
@@ -146,6 +157,7 @@ static void context_init(stream_context_t *context,
                          int direction,
                          const char *name,
                          audio_error_callback_t error_cb,
+                         audio_finished_callback_t finished_cb,
                          void *userdata,
                          const char **message) {
     audio_stream_t *stream = context->stream;
@@ -163,7 +175,7 @@ static int context_start(stream_context_t *ctx, const char **message) {
             ? pa_stream_connect_record(ctx->pa_stream, NULL, &ctx->stream->buffer_attr, stream_flags)
             : pa_stream_connect_playback(ctx->pa_stream, NULL, &ctx->stream->buffer_attr, stream_flags, NULL, NULL);
     if (err) {
-        *message = pa_strerror(err);
+        SET_MESSAGE(message, pa_strerror(err));
         return -1;
     }
     ctx->running = true;
@@ -175,7 +187,7 @@ static int context_stop(stream_context_t *ctx, const char **message) {
         return 0;
     int err = pa_stream_disconnect(ctx->pa_stream);
     if (err) {
-        *message = pa_strerror(err);
+        SET_MESSAGE(message, pa_strerror(err));
         return -1;
     }
     ctx->running = false;
@@ -196,7 +208,7 @@ int audio_init(const char **message) {
         return 0;
     mainloop = pa_threaded_mainloop_new();
     if ((err = pa_threaded_mainloop_start(mainloop))) {
-        *message = pa_strerror(err);
+        SET_MESSAGE(message, pa_strerror(err));
         return -1;
     }
     return 0;
@@ -226,7 +238,7 @@ void audio_stream_init(audio_stream_t *stream, const audio_stream_params_t *para
     stream->sample_spec.channels = params->channels;
     stream->sample_spec.rate = params->sample_rate;
 
-    size_t bufsize = audio_stream_frame_bufsize(params);
+    size_t bufsize = audio_stream_frame_bufsize(params, params->frame_duration);
     stream->buffer_attr.maxlength = bufsize;
     stream->buffer_attr.tlength = bufsize;
     stream->buffer_attr.prebuf = sizeof(uint32_t) - 1;
@@ -266,7 +278,7 @@ int audio_stream_connect(audio_stream_t *stream, const char **message) {
     return 0;
 
 fail:
-    *message = pa_strerror(err);
+    SET_MESSAGE(message, pa_strerror(err));
     mainloop_unlock();
     return -1;
 }
@@ -276,10 +288,12 @@ int audio_stream_open_record(audio_stream_t *stream,
                              const char *name,
                              audio_record_callback_t record_cb,
                              audio_error_callback_t error_cb,
+                             audio_finished_callback_t finished_cb,
                              void *userdata,
                              const char **message) {
     mainloop_lock();
-    context_init((stream_context_t *)&stream->record, STREAM_DIRECTION_IN, name, error_cb, userdata, message);
+    context_init(
+        (stream_context_t *)&stream->record, STREAM_DIRECTION_IN, name, error_cb, finished_cb, userdata, message);
     pa_stream_set_read_callback(stream->record.pa_stream, on_audio_read, &stream->record);
     stream->record.record_cb = record_cb;
     mainloop_unlock();
@@ -291,10 +305,12 @@ int audio_stream_open_playback(audio_stream_t *stream,
                                const char *name,
                                audio_playback_callback_t playback_cb,
                                audio_error_callback_t error_cb,
+                               audio_finished_callback_t finished_cb,
                                void *userdata,
                                const char **message) {
     mainloop_lock();
-    context_init((stream_context_t *)&stream->playback, STREAM_DIRECTION_OUT, name, error_cb, userdata, message);
+    context_init(
+        (stream_context_t *)&stream->playback, STREAM_DIRECTION_OUT, name, error_cb, finished_cb, userdata, message);
     pa_stream_set_write_callback(stream->playback.pa_stream, on_audio_write, &stream->playback);
     stream->playback.playback_cb = playback_cb;
     mainloop_unlock();

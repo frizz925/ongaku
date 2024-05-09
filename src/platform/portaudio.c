@@ -1,11 +1,10 @@
 #include "../audio.h"
+#include "../util.h"
 
 #include <portaudio.h>
 
 #include <stdbool.h>
 #include <stdio.h>
-#include <stdlib.h>
-#include <string.h>
 
 static PaHostApiIndex host_api = paHostApiNotFound;
 
@@ -14,6 +13,7 @@ static PaHostApiIndex host_api = paHostApiNotFound;
     audio_stream_t *stream; \
     PaStreamParameters pa_params; \
     PaStream *pa_stream; \
+    audio_finished_callback_t finished_cb; \
     void *userdata;
 
 typedef enum {
@@ -84,6 +84,12 @@ static int on_stream_output(const void *input,
     return stream_callback_result_to_pa(result);
 }
 
+static void on_stream_finished(void *userdata) {
+    stream_context_t *ctx = userdata;
+    if (ctx->finished_cb)
+        ctx->finished_cb(ctx->userdata);
+}
+
 static PaDeviceIndex find_device(const char *dev, const audio_stream_params_t *params, audio_direction_t direction) {
     if (!dev)
         return direction == DIRECTION_IN ? Pa_GetDefaultInputDevice() : Pa_GetDefaultOutputDevice();
@@ -121,6 +127,7 @@ static void stream_context_reset(stream_context_t *ctx, audio_stream_t *stream) 
 static int context_init(stream_context_t *ctx,
                         PaDeviceIndex idx,
                         audio_direction_t direction,
+                        audio_finished_callback_t finished_cb,
                         void *userdata,
                         const char **message) {
     audio_stream_t *stream = ctx->stream;
@@ -130,6 +137,7 @@ static int context_init(stream_context_t *ctx,
     ctx->pa_params.device = idx;
     ctx->pa_params.suggestedLatency =
         direction == DIRECTION_IN ? info->defaultLowInputLatency : info->defaultLowOutputLatency;
+    ctx->finished_cb = finished_cb;
     ctx->userdata = userdata;
     PaError err = Pa_OpenStream(&ctx->pa_stream,
                                 direction == DIRECTION_IN ? &ctx->pa_params : NULL,
@@ -140,9 +148,10 @@ static int context_init(stream_context_t *ctx,
                                 direction == DIRECTION_IN ? on_stream_input : on_stream_output,
                                 ctx);
     if (err) {
-        *message = Pa_GetErrorText(err);
+        SET_MESSAGE(message, Pa_GetErrorText(err));
         return -1;
     }
+    Pa_SetStreamFinishedCallback(ctx->pa_stream, on_stream_finished);
     return 0;
 }
 
@@ -151,7 +160,7 @@ static int context_start(stream_context_t *ctx, const char **message) {
     if (ctx->running || !ctx->pa_stream)
         return 0;
     if ((err = Pa_StartStream(ctx->pa_stream)) != paNoError) {
-        *message = Pa_GetErrorText(err);
+        SET_MESSAGE(message, Pa_GetErrorText(err));
         return -1;
     }
     ctx->running = true;
@@ -163,7 +172,7 @@ static int context_stop(stream_context_t *ctx, const char **message) {
     if (!ctx->running || !ctx->pa_stream)
         return 0;
     if ((err = Pa_StopStream(ctx->pa_stream)) != paNoError) {
-        *message = Pa_GetErrorText(err);
+        SET_MESSAGE(message, Pa_GetErrorText(err));
         return -1;
     }
     ctx->running = false;
@@ -174,7 +183,7 @@ static int context_deinit(stream_context_t *ctx, const char **message) {
     if (ctx->pa_stream) {
         PaError err = Pa_CloseStream(ctx->pa_stream);
         if (err) {
-            *message = Pa_GetErrorText(err);
+            SET_MESSAGE(message, Pa_GetErrorText(err));
             return -1;
         }
     }
@@ -188,7 +197,7 @@ static int context_deinit(stream_context_t *ctx, const char **message) {
 int audio_init(const char **message) {
     PaError err = Pa_Initialize();
     if (err != paNoError) {
-        *message = Pa_GetErrorText(err);
+        SET_MESSAGE(message, Pa_GetErrorText(err));
         return -1;
     }
 #ifdef _WIN32
@@ -206,7 +215,7 @@ int audio_init(const char **message) {
 int audio_terminate(const char **message) {
     PaError err = Pa_Terminate();
     if (err != paNoError) {
-        *message = Pa_GetErrorText(err);
+        SET_MESSAGE(message, Pa_GetErrorText(err));
         return -1;
     }
     return 0;
@@ -222,7 +231,7 @@ void audio_stream_init(audio_stream_t *stream, const audio_stream_params_t *para
     memset(stream, 0, audio_stream_sizeof());
     stream->connected = false;
     stream->params = *params;
-    stream->frame_count = audio_stream_frame_count(params);
+    stream->frame_count = audio_stream_frame_count(params, params->frame_duration);
     stream_context_reset((stream_context_t *)&stream->playback, stream);
     stream_context_reset((stream_context_t *)&stream->record, stream);
 }
@@ -246,14 +255,16 @@ int audio_stream_open_record(audio_stream_t *stream,
                              const char *name,
                              audio_record_callback_t record_cb,
                              audio_error_callback_t error_cb,
+                             audio_finished_callback_t finished_cb,
                              void *userdata,
                              const char **message) {
+    assert(record_cb != NULL);
     PaDeviceIndex idx = dev ? find_device(dev, &stream->params, DIRECTION_IN) : Pa_GetDefaultInputDevice();
     if (idx == paNoDevice) {
-        *message = "Output device not found";
+        SET_MESSAGE(message, "Input device not found");
         return -1;
     }
-    if (context_init((stream_context_t *)&stream->record, idx, DIRECTION_IN, userdata, message))
+    if (context_init((stream_context_t *)&stream->record, idx, DIRECTION_IN, finished_cb, userdata, message))
         return -1;
     stream->record.record_cb = record_cb;
     return 0;
@@ -263,14 +274,16 @@ int audio_stream_open_playback(audio_stream_t *stream,
                                const char *name,
                                audio_playback_callback_t playback_cb,
                                audio_error_callback_t error_cb,
+                               audio_finished_callback_t finished_cb,
                                void *userdata,
                                const char **message) {
+    assert(playback_cb != NULL);
     PaDeviceIndex idx = dev ? find_device(dev, &stream->params, DIRECTION_OUT) : Pa_GetDefaultOutputDevice();
     if (idx == paNoDevice) {
-        *message = "Output device not found";
+        SET_MESSAGE(message, "Output device not found");
         return -1;
     }
-    if (context_init((stream_context_t *)&stream->playback, idx, DIRECTION_OUT, userdata, message))
+    if (context_init((stream_context_t *)&stream->playback, idx, DIRECTION_OUT, finished_cb, userdata, message))
         return -1;
     stream->playback.playback_cb = playback_cb;
     return 0;
