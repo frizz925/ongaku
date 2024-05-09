@@ -76,9 +76,7 @@ size_t ringbuf_writeptr(ringbuf_t *rb, void **ptr, size_t size) {
     if (rb->widx >= rb->cap)
         rb->widx = 0;
     size_t available = ((rb->widx < rb->ridx) ? rb->ridx : rb->cap) - rb->widx;
-    if (size > 0 && available < size) {
-        if (rb->widx <= rb->ridx)
-            return 0;
+    if (available < size && rb->widx > rb->ridx) {
         rb->tidx = rb->widx;
         rb->widx = 0;
         available = rb->ridx;
@@ -126,7 +124,7 @@ size_t ringbuf_read(ringbuf_t *rb, void *dst, size_t len) {
     while (off < len && ringbuf_remaining(rb) > 0) {
         size_t left = len - off;
         size_t size = ringbuf_readptr(rb, &ptr);
-        size_t read = min(left, size);
+        size_t read = MIN(left, size);
         if (read <= 0)
             break;
         memcpy(dst + off, ptr, read);
@@ -144,7 +142,7 @@ size_t ringbuf_write(ringbuf_t *rb, const void *src, size_t len) {
     while (off < len && ringbuf_available(rb) > 0) {
         size_t left = len - off;
         size_t size = ringbuf_writeptr(rb, &ptr, 0);
-        size_t write = min(left, size);
+        size_t write = MIN(left, size);
         if (write <= 0)
             break;
         memcpy(ptr, src + off, write);

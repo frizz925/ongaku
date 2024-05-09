@@ -53,19 +53,11 @@ typedef struct {
 
 static client_t *clients[MAX_CLIENTS] = {0};
 
-static audio_callback_result_t on_error(const char *message, void *userdata) {
-    client_t *client = userdata;
-    log_error("%s Stream error: %s", client->addr, message);
-    return AUDIO_STREAM_ABORT;
-}
-
 static audio_callback_result_t on_record(const void *src, size_t srclen, void *userdata) {
     const char *message;
     client_t *c = userdata;
     if (time(NULL) - c->timer > STREAM_TIMEOUT_SECONDS) {
         log_info("%s Client timeout", c->addr);
-        c->removed = true;
-        client_removed = true;
         return AUDIO_STREAM_COMPLETE;
     }
 
@@ -98,6 +90,17 @@ static audio_callback_result_t on_playback(void *dst, size_t *dstlen, void *user
     return AUDIO_STREAM_CONTINUE;
 }
 
+static void on_error(const char *message, void *userdata) {
+    client_t *client = userdata;
+    log_error("%s Stream error: %s", client->addr, message);
+}
+
+static void on_finished(void *userdata) {
+    client_t *c = userdata;
+    c->removed = true;
+    client_removed = true;
+}
+
 static int client_init(client_t *c, const struct sockaddr *sa, socklen_t socklen, int flags, const char **message) {
     audio_stream_params_t params = DEFAULT_AUDIO_STREAM_PARAMS(APPLICATION_NAME);
     if (flags & STREAMCFG_FLAG_SAMPLE_F32) {
@@ -113,12 +116,12 @@ static int client_init(client_t *c, const struct sockaddr *sa, socklen_t socklen
         int err;
         c->enc = opus_encoder_create(params.sample_rate, params.channels, OPUS_APPLICATION, &err);
         if (err) {
-            *message = opus_strerror(err);
+            SET_MESSAGE(message, opus_strerror(err));
             return -1;
         }
         c->dec = opus_decoder_create(params.sample_rate, params.channels, &err);
         if (err) {
-            *message = opus_strerror(err);
+            SET_MESSAGE(message, opus_strerror(err));
             return -1;
         }
     } else {
@@ -130,7 +133,7 @@ static int client_init(client_t *c, const struct sockaddr *sa, socklen_t socklen
     c->socklen = socklen;
     c->sa = malloc_copy(sa, socklen);
     c->stream = audio_stream_new(&c->params);
-    c->rb = ringbuf_new(FRAME_BUFFER_DURATION * audio_stream_sample_count(&c->params));
+    c->rb = ringbuf_new(audio_stream_frame_bufsize(&c->params, FRAME_BUFFER_DURATION));
 
     time(&c->timer);
     strsockaddr_r(sa, socklen, c->addr, sizeof(c->addr));
@@ -146,10 +149,10 @@ static int client_start(client_t *c, const char *indev, const char *outdev, cons
     if (audio_stream_connect(c->stream, message))
         goto fail;
     if (c->flags & STREAMCFG_FLAG_INPUT &&
-        audio_stream_open_record(c->stream, indev, c->addr, on_record, on_error, c, message))
+        audio_stream_open_record(c->stream, indev, c->addr, on_record, on_error, on_finished, c, message))
         goto disconnect_fail;
     if (c->flags & STREAMCFG_FLAG_OUTPUT &&
-        audio_stream_open_playback(c->stream, outdev, c->addr, on_playback, on_error, c, message))
+        audio_stream_open_playback(c->stream, outdev, c->addr, on_playback, on_error, on_finished, c, message))
         goto disconnect_fail;
     if (audio_stream_start(c->stream, message))
         goto disconnect_fail;
