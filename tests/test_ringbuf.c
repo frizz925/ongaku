@@ -19,7 +19,7 @@ int main() {
 
     req = 2;
     size = ringbuf_writeptr(rb, (void *)&ptr, req);
-    assert(size >= 2);
+    assert(size >= req);
 
     base = 10;
     for (value = base; value < base + req; value++)

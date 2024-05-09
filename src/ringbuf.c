@@ -88,7 +88,7 @@ size_t ringbuf_writeptr(ringbuf_t *rb, void **ptr, size_t count) {
         return 0;
     size_t widx = (rb->widx < rb->cap) ? rb->widx : 0;
     size_t available = ((widx < rb->ridx) ? rb->ridx : rb->cap) - widx;
-    if (available < count && widx > rb->ridx) {
+    if (available < count && widx >= rb->ridx) {
         rb->tidx = widx;
         available = rb->ridx;
         widx = 0;
