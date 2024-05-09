@@ -1,5 +1,5 @@
-#include "../audio.h"
-#include "../util.h"
+#include "audio.h"
+#include "util.h"
 
 #include <pulse/pulseaudio.h>
 
