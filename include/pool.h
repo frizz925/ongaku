@@ -8,7 +8,6 @@ typedef struct pool_element pool_element_t;
 typedef struct pool {
     pool_element_t *base, *head, *tail;
     size_t blocksize;
-    size_t length;
     size_t capacity;
 } pool_t;
 

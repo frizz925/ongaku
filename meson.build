@@ -1,5 +1,6 @@
 project('ongaku', 'c')
 compiler = meson.get_compiler('c')
+inc_dir = include_directories('include')
 
 lib_src = [
     'src/audio.c',
@@ -19,6 +20,7 @@ if host_machine.system() == 'linux'
         'ongaku-pulse',
         sources: ['src/log.c', 'src/pulse.c'],
         dependencies: pulse,
+        include_directories: inc_dir,
     )
 else
     lib_src += 'src/platform/portaudio.c'
@@ -37,6 +39,7 @@ lib = library(
     'ongaku',
     sources: lib_src,
     dependencies: lib_deps,
+    include_directories: inc_dir,
     install: true,
 )
 common_libs = [lib]
@@ -46,6 +49,7 @@ executable(
     sources: common_src + 'src/server.c',
     dependencies: common_deps,
     link_with: common_libs,
+    include_directories: inc_dir,
     install: true,
 )
 
@@ -54,5 +58,24 @@ executable(
     sources: common_src + 'src/client.c',
     dependencies: common_deps,
     link_with: common_libs,
+    include_directories: inc_dir,
     install: true,
+)
+
+test(
+    'pool test',
+    executable(
+        'test_pool',
+        sources: ['src/pool.c', 'tests/test_pool.c'],
+        include_directories: inc_dir,
+    ),
+)
+
+test(
+    'ringbuf test',
+    executable(
+        'test_ringbuf',
+        sources: ['src/ringbuf.c', 'tests/test_ringbuf.c'],
+        include_directories: inc_dir,
+    ),
 )

@@ -1,4 +1,8 @@
-builddir
 .vscode
-*.o
 .DS_Store
+.cache
+
+build
+builddir
+
+*.o
