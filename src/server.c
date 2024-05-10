@@ -35,13 +35,13 @@ static void on_signal(int sig) {
 
 typedef struct {
     uint8_t idx;
-    bool assigned;
     atomic_bool removed;
     atomic_bool running;
     int flags;
     socklen_t socklen;
     time_t timer;
     audio_stream_params_t params;
+    const uint8_t *ptr;
     struct sockaddr *sa;
     OpusEncoder *enc;
     OpusDecoder *dec;
@@ -101,7 +101,19 @@ static void on_finished(void *userdata) {
     client_removed = true;
 }
 
-static int client_init(client_t *c, const struct sockaddr *sa, socklen_t socklen, int flags, const char **message) {
+static client_t *client_new(const uint8_t *ptr,
+                            const struct sockaddr *sa,
+                            socklen_t socklen,
+                            int flags,
+                            const char **message) {
+    assert(socklen >= sizeof(struct sockaddr));
+
+    client_t *c = malloc_zero(sizeof(client_t));
+    c->idx = *ptr;
+    c->ptr = ptr;
+    c->flags = flags;
+    c->socklen = socklen;
+
     audio_stream_params_t params = DEFAULT_AUDIO_STREAM_PARAMS(APPLICATION_NAME);
     if (flags & STREAMCFG_FLAG_SAMPLE_F32) {
         params.sample_size = sizeof(float);
@@ -117,20 +129,15 @@ static int client_init(client_t *c, const struct sockaddr *sa, socklen_t socklen
         c->enc = opus_encoder_create(params.sample_rate, params.channels, OPUS_APPLICATION, &err);
         if (err) {
             SET_MESSAGE(message, opus_strerror(err));
-            return -1;
+            return NULL;
         }
         c->dec = opus_decoder_create(params.sample_rate, params.channels, &err);
         if (err) {
             SET_MESSAGE(message, opus_strerror(err));
-            return -1;
+            return NULL;
         }
-    } else {
-        c->enc = NULL;
-        c->dec = NULL;
     }
 
-    c->flags = flags;
-    c->socklen = socklen;
     c->sa = malloc_copy(sa, socklen);
     c->stream = audio_stream_new(&c->params);
     c->rb =
@@ -139,9 +146,7 @@ static int client_init(client_t *c, const struct sockaddr *sa, socklen_t socklen
     time(&c->timer);
     strsockaddr_r(sa, socklen, c->addr, sizeof(c->addr));
 
-    assert(c->socklen >= sizeof(struct sockaddr));
-
-    return 0;
+    return c;
 }
 
 static int client_start(client_t *c, const char *indev, const char *outdev, const char **message) {
@@ -185,7 +190,7 @@ static int client_stop(client_t *c, const char **message) {
     return 0;
 }
 
-static void client_deinit(client_t *c) {
+static void client_free(client_t *c) {
     if (c->stream)
         audio_stream_free(c->stream);
     if (c->enc)
@@ -194,39 +199,22 @@ static void client_deinit(client_t *c) {
         ringbuf_free(c->rb);
     if (c->sa)
         free(c->sa);
-
-    c->removed = false;
-    c->running = false;
-    c->socklen = 0;
-    c->timer = 0;
-    c->sa = NULL;
-    c->enc = NULL;
-    c->stream = NULL;
-    c->rb = NULL;
-    c->addr[0] = '\0';
+    free(c);
 }
 
 static client_t *add_client(const struct sockaddr *sa, socklen_t socklen, const char *addr, int flags) {
-    static uint8_t client_idx = 0;
     const char *message;
 
-    client_t *c = (client_t *)pool_get(&pool);
-    if (!c) {
+    uint8_t *ptr = (uint8_t *)pool_get(&pool);
+    if (!ptr) {
         log_error("%s Pool exhausted, can't accept anymore client!", addr);
         return NULL;
     }
-    if (!c->assigned) {
-        if (client_idx >= MAX_CLIENTS) {
-            log_error("%s Maximum clients reached!", addr);
-            goto fail;
-        }
-        c->idx = client_idx++;
-        c->assigned = true;
-    }
 
-    if (client_init(c, sa, socklen, flags, &message)) {
-        log_error("%s Failed to initialize client: %s", message);
-        goto fail;
+    client_t *c = client_new(ptr, sa, socklen, flags, &message);
+    if (!c) {
+        log_error("%s Failed to create client: %s", message);
+        return NULL;
     }
 
     memcpy(c->buf, HANDSHAKE_MAGIC_STRING, HANDSHAKE_MAGIC_STRING_LEN);
@@ -243,13 +231,13 @@ static client_t *add_client(const struct sockaddr *sa, socklen_t socklen, const 
     log_info("%s Client started", addr);
 
     clients[c->idx] = c;
-    log_debug("%s Client added, index: %d", c->addr, c->idx);
+    log_debug("%s Client added, index: %d", addr, c->idx);
 
     return c;
 
 fail:
-    client_deinit(c);
-    pool_put(&pool, c);
+    client_free(c);
+    pool_put(&pool, ptr);
     return NULL;
 }
 
@@ -268,8 +256,8 @@ static void remove_client(client_t *c) {
     if (sendto(sock, (char *)&flag, sizeof(flag), 0, c->sa, c->socklen) < 0)
         log_error("%s Failed to send close packet: %s", c->addr, socket_strerror());
 
-    client_deinit(c);
-    pool_put(&pool, c);
+    pool_put(&pool, (void *)c->ptr);
+    client_free(c);
 }
 
 static void handle_handshake(const struct sockaddr *sa, socklen_t socklen, const char *buf, size_t buflen) {
@@ -317,7 +305,13 @@ int main() {
         log_fatal("Failed to initialize audio: %s", message);
         goto fail;
     }
-    pool_init(&pool, sizeof(client_t), 0);
+
+    pool_init(&pool, sizeof(uint8_t), MAX_CLIENTS);
+    for (uint8_t idx = 0; idx < MAX_CLIENTS; idx++) {
+        uint8_t *ptr = pool_get(&pool);
+        *ptr = idx;
+        pool_put(&pool, ptr);
+    }
 
     struct sockaddr_in6 sin6;
     struct sockaddr *sa = (struct sockaddr *)&sin6;
