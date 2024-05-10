@@ -18,6 +18,7 @@
     pa_stream *pa_stream; \
     audio_stream_t *stream; \
     audio_error_callback_t error_cb; \
+    audio_finished_callback_t finished_cb; \
     void *userdata;
 
 #define STREAM_ERROR(ctx, message) \
@@ -68,11 +69,11 @@ static void on_context_state(pa_context *context, void *userdata) {
 
 static int context_stop(stream_context_t *ctx, const char **message);
 
-static void on_audio_read(pa_stream *stream, size_t nbytes, void *userdata) {
+static void on_stream_read(pa_stream *stream, size_t nbytes, void *userdata) {
     int err;
     const char *message;
     const void *data;
-    audio_callback_result_t result;
+    audio_callback_result_t result = AUDIO_STREAM_CONTINUE;
     record_context_t *ctx = userdata;
 
     if ((err = pa_stream_peek(stream, &data, &nbytes))) {
@@ -101,7 +102,7 @@ end:
     }
 }
 
-static void on_audio_write(pa_stream *stream, size_t nbytes, void *userdata) {
+static void on_stream_write(pa_stream *stream, size_t nbytes, void *userdata) {
     int err;
     const char *message;
     void *data;
@@ -136,6 +137,21 @@ end:
     }
 }
 
+static void on_stream_state(pa_stream *stream, void *userdata) {
+    stream_context_t *ctx = userdata;
+    switch (pa_stream_get_state(stream)) {
+    case PA_STREAM_UNCONNECTED:
+    case PA_STREAM_CREATING:
+    case PA_STREAM_READY:
+        /* Do nothing */
+        break;
+    default:
+        if (ctx->finished_cb)
+            ctx->finished_cb(ctx->userdata);
+        break;
+    }
+}
+
 static inline void mainloop_lock() {
     pa_threaded_mainloop_lock(mainloop);
     lock_count++;
@@ -164,7 +180,9 @@ static void context_init(stream_context_t *context,
     context->direction = direction;
     context->pa_stream = pa_stream_new(stream->pa_context, name, &stream->sample_spec, NULL);
     context->error_cb = error_cb;
+    context->finished_cb = finished_cb;
     context->userdata = userdata;
+    pa_stream_set_state_callback(context->pa_stream, on_stream_state, context);
 }
 
 static int context_start(stream_context_t *ctx, const char **message) {
@@ -294,7 +312,7 @@ int audio_stream_open_record(audio_stream_t *stream,
     mainloop_lock();
     context_init(
         (stream_context_t *)&stream->record, STREAM_DIRECTION_IN, name, error_cb, finished_cb, userdata, message);
-    pa_stream_set_read_callback(stream->record.pa_stream, on_audio_read, &stream->record);
+    pa_stream_set_read_callback(stream->record.pa_stream, on_stream_read, &stream->record);
     stream->record.record_cb = record_cb;
     mainloop_unlock();
     return 0;
@@ -311,7 +329,7 @@ int audio_stream_open_playback(audio_stream_t *stream,
     mainloop_lock();
     context_init(
         (stream_context_t *)&stream->playback, STREAM_DIRECTION_OUT, name, error_cb, finished_cb, userdata, message);
-    pa_stream_set_write_callback(stream->playback.pa_stream, on_audio_write, &stream->playback);
+    pa_stream_set_write_callback(stream->playback.pa_stream, on_stream_write, &stream->playback);
     stream->playback.playback_cb = playback_cb;
     mainloop_unlock();
     return 0;
