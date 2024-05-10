@@ -5,7 +5,6 @@
 #include "util.h"
 
 #include <opus/opus.h>
-#include <sodium.h>
 
 #include <assert.h>
 #include <signal.h>
