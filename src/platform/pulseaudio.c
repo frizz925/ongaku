@@ -13,6 +13,7 @@
 #define STREAM_DIRECTION_OUT 2
 
 #define STREAM_CONTEXT_FIELDS \
+    atomic_int refcount; \
     atomic_bool running; \
     int direction; \
     pa_stream *pa_stream; \
@@ -44,6 +45,9 @@ typedef struct {
 } playback_context_t;
 
 struct audio_stream {
+    atomic_bool connected;
+    atomic_int lock_count;
+
     pa_sample_spec sample_spec;
     pa_buffer_attr buffer_attr;
 
@@ -51,9 +55,6 @@ struct audio_stream {
 
     record_context_t record;
     playback_context_t playback;
-
-    atomic_bool connected;
-    atomic_int lock_count;
 };
 
 static void on_context_state(pa_context *context, void *userdata) {
@@ -68,6 +69,7 @@ static void on_context_state(pa_context *context, void *userdata) {
 }
 
 static int context_stop(stream_context_t *ctx, const char **message);
+static void context_deinit(stream_context_t *ctx);
 
 static void on_stream_read(pa_stream *stream, size_t nbytes, void *userdata) {
     int err;
@@ -76,6 +78,8 @@ static void on_stream_read(pa_stream *stream, size_t nbytes, void *userdata) {
     audio_callback_result_t result = AUDIO_STREAM_CONTINUE;
     record_context_t *ctx = userdata;
 
+    if (!ctx->running)
+        return;
     if ((err = pa_stream_peek(stream, &data, &nbytes))) {
         STREAM_ERROR(ctx, pa_strerror(err));
         goto end;
@@ -109,6 +113,8 @@ static void on_stream_write(pa_stream *stream, size_t nbytes, void *userdata) {
     audio_callback_result_t result;
     playback_context_t *ctx = (playback_context_t *)userdata;
 
+    if (!ctx->running)
+        return;
     if ((err = pa_stream_begin_write(stream, &data, &nbytes))) {
         STREAM_ERROR(ctx, pa_strerror(err));
         goto end;
@@ -148,6 +154,7 @@ static void on_stream_state(pa_stream *stream, void *userdata) {
     default:
         if (ctx->finished_cb)
             ctx->finished_cb(ctx->userdata);
+        context_deinit(ctx);
         break;
     }
 }
@@ -177,6 +184,7 @@ static void context_init(stream_context_t *context,
                          void *userdata,
                          const char **message) {
     audio_stream_t *stream = context->stream;
+    context->refcount = 0;
     context->direction = direction;
     context->pa_stream = pa_stream_new(stream->pa_context, name, &stream->sample_spec, NULL);
     context->error_cb = error_cb;
@@ -196,6 +204,7 @@ static int context_start(stream_context_t *ctx, const char **message) {
         SET_MESSAGE(message, pa_strerror(err));
         return -1;
     }
+    ctx->refcount++;
     ctx->running = true;
     return 0;
 }
@@ -213,8 +222,15 @@ static int context_stop(stream_context_t *ctx, const char **message) {
 }
 
 static void context_deinit(stream_context_t *context) {
+    if (context->refcount > 0) {
+        context->refcount--;
+        return;
+    }
+
     if (context->pa_stream)
         pa_stream_unref(context->pa_stream);
+
+    context->refcount = 0;
     context->pa_stream = NULL;
     context->error_cb = NULL;
     context->userdata = NULL;
