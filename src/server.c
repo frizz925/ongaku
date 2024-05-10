@@ -5,6 +5,7 @@
 #include "util.h"
 
 #include <opus/opus.h>
+#include <sodium.h>
 
 #include <assert.h>
 #include <signal.h>
@@ -18,11 +19,13 @@
 #define SOCKET_BUFSIZE 32768
 #define STREAM_NAME_MAXLEN 128
 #define STREAM_TIMEOUT_SECONDS 30
+#define HEARTBEAT_INTERVAL_SECONDS 10
 
 static pool_t pool;
 static socket_t sock = SOCKET_UNDEFINED;
 static atomic_bool running = true;
 static atomic_bool client_removed = false;
+static char buf[SOCKET_BUFSIZE];
 
 static void on_signal(int sig) {
 #ifdef _WIN32
@@ -260,6 +263,18 @@ static void remove_client(client_t *c) {
     client_free(c);
 }
 
+static void send_heartbeat(client_t *c) {
+    packet_server_header_t hdr = {.type = PACKET_TYPE_HEARTBEAT};
+    uint32_t timer = htonl(time(NULL));
+
+    char *ptr = buf;
+    ptr += packet_server_header_write(buf, sizeof(buf), &hdr);
+    ptr += memwrite(ptr, &timer, sizeof(timer));
+
+    if (sendto(sock, buf, ptr - buf, 0, c->sa, c->socklen) < 0)
+        log_error("%s Failed to send heartbeat packet: %s", c->addr, socket_strerror());
+}
+
 static void handle_handshake(const struct sockaddr *sa, socklen_t socklen, const char *buf, size_t buflen) {
     const char *addr = strsockaddr(sa, socklen);
     packet_config_t cfg = {.flags = DEFAULT_STREAMCFG_FLAGS};
@@ -290,6 +305,20 @@ static void handle_client_removal() {
         remove_client(c);
     }
     client_removed = false;
+}
+
+static void handle_client_heartbeat() {
+    static time_t timer = 0;
+    if (timer == 0)
+        time(&timer);
+    if (time(NULL) - timer < HEARTBEAT_INTERVAL_SECONDS)
+        return;
+    for (int i = 0; i < MAX_CLIENTS; i++) {
+        client_t *c = clients[i];
+        if (!c)
+            continue;
+        send_heartbeat(c);
+    }
 }
 
 int main() {
@@ -344,6 +373,7 @@ int main() {
         }
 
         handle_client_removal();
+        handle_client_heartbeat();
         if (res <= 0)
             continue;
 

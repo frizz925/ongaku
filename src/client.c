@@ -1,6 +1,7 @@
 #include "callbacks.h"
 #include "log.h"
 #include "protocol.h"
+#include "util.h"
 
 #include <opus/opus.h>
 
@@ -16,7 +17,7 @@
 #define APPLICATION_NAME "Ongaku"
 #define SOCKET_BUFSIZE 32768
 #define STREAM_TIMEOUT_SECONDS 30
-#define HEARTBEAT_INTERVAL_SECONDS 15
+#define HEARTBEAT_INTERVAL_SECONDS 10
 #define HANDSHAKE_RETRY 5
 
 typedef struct {
@@ -31,6 +32,7 @@ typedef struct {
 
 static socket_t sock = SOCKET_UNDEFINED;
 static atomic_bool running = true;
+static char buf[SOCKET_BUFSIZE];
 
 static void on_signal(int sig) {
 #ifdef _WIN32
@@ -43,7 +45,13 @@ static void on_signal(int sig) {
 
 static void send_heartbeat(socket_t sock, uint8_t idx) {
     packet_client_header_t hdr = {.idx = idx, .type = PACKET_TYPE_HEARTBEAT};
-    if (send(sock, (char *)&hdr, sizeof(hdr), 0) < 0)
+    uint32_t timer = htonl(time(NULL));
+
+    char *ptr = buf;
+    ptr += packet_client_header_write(ptr, sizeof(buf), &hdr);
+    ptr += memwrite(ptr, &timer, sizeof(timer));
+
+    if (send(sock, buf, ptr - buf, 0) < 0)
         log_error("Failed to send heartbeat packet: %s", socket_strerror());
 }
 

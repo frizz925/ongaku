@@ -1,7 +1,6 @@
 #ifndef _UTIL_H
 #define _UTIL_H
 
-#include <assert.h>
 #include <stddef.h>
 #include <stdlib.h>
 #include <string.h>
@@ -28,6 +27,11 @@ static inline void *malloc_zero(size_t len) {
     void *ptr = malloc(len);
     memset(ptr, 0, len);
     return ptr;
+}
+
+static inline size_t memwrite(void *dst, const void *src, size_t len) {
+    memcpy(dst, src, len);
+    return len;
 }
 
 #endif
