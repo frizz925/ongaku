@@ -4,11 +4,6 @@
 #include <stddef.h>
 #include <stdint.h>
 
-#ifdef _WIN32
-#else
-#include <netinet/in.h>
-#endif
-
 #define DEFAULT_PORT 7890
 
 #define HANDSHAKE_MAGIC_STRING "iwanttolicksakiabs"

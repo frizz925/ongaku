@@ -1,6 +1,12 @@
 #include "protocol.h"
 #include "util.h"
 
+#ifdef _WIN32
+#include <winsock2.h>
+#else
+#include <netinet/in.h>
+#endif
+
 size_t packet_handshake_write(char *buf, size_t len) {
     if (len < HANDSHAKE_MAGIC_STRING_LEN)
         return 0;
