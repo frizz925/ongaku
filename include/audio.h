@@ -4,12 +4,11 @@
 #include <opus/opus.h>
 
 #include <stddef.h>
-#include <stdint.h>
 
 #define CHANNELS 2
 #define SAMPLE_RATE 48000
 #define FRAME_PACKET_DURATION 0.02
-#define FRAME_BUFFER_DURATION 1.0
+#define FRAME_BUFFER_DURATION 0.2
 #define FRAME_DURATION FRAME_PACKET_DURATION
 
 #define SAMPLE_FORMAT opus_int16
