@@ -3,7 +3,6 @@
 
 #include "audio.h"
 #include "ringbuf.h"
-#include "socket.h"
 
 #include <opus/opus.h>
 

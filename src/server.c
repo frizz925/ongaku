@@ -2,6 +2,7 @@
 #include "log.h"
 #include "pool.h"
 #include "protocol.h"
+#include "socket.h"
 #include "util.h"
 
 #include <opus/opus.h>
