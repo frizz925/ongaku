@@ -8,8 +8,8 @@
 #define CHANNELS 2
 #define SAMPLE_RATE 48000
 #define FRAME_PACKET_DURATION 0.02
-#define FRAME_BUFFER_DURATION 1.0
 #define FRAME_DURATION FRAME_PACKET_DURATION
+#define FRAME_BUFFER_COUNT 1024
 
 #define SAMPLE_FORMAT opus_int16
 #define SAMPLE_SIZE sizeof(SAMPLE_FORMAT)
@@ -72,6 +72,7 @@ typedef void (*audio_finished_callback_t)(void *userdata);
 size_t audio_stream_frame_size(const audio_stream_params_t *params);
 size_t audio_stream_frame_count(const audio_stream_params_t *params, double duration);
 size_t audio_stream_frame_bufsize(const audio_stream_params_t *params, double duration);
+size_t audio_buffer_frame_count();
 
 int audio_init(const char **message);
 int audio_terminate(const char **message);

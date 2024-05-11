@@ -377,8 +377,7 @@ int main(int argc, char *argv[]) {
 
     signal(SIGINT, on_signal);
 
-    ringbuf_t *rb =
-        ringbuf_new(audio_stream_frame_count(&params, FRAME_BUFFER_DURATION), audio_stream_frame_size(&params));
+    ringbuf_t *rb = ringbuf_new(audio_buffer_frame_count(), audio_stream_frame_size(&params));
     while (running && rc == EXIT_SUCCESS) {
         ringbuf_clear(rb);
         rc = application_loop(flags, indev, outdev, sa, socklen, addr, &params, rb);
