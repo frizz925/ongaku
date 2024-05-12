@@ -3,9 +3,7 @@
 
 #include "crypto.h"
 
-int crypto_sodium_init(const char **message);
-int crypto_sodium_terminate(const char **message);
-
+int crypto_sodium_init();
 void crypto_init_sodium(crypto_t *crypto, int server);
 
 #endif

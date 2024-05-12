@@ -1,4 +1,7 @@
 #include "callbacks.h"
+#include "crypto/crypto.h"
+#include "crypto/plaintext.h"
+#include "crypto/sodium.h"
 #include "log.h"
 #include "protocol.h"
 #include "socket.h"
@@ -24,6 +27,7 @@
 typedef struct {
     uint8_t idx;
     time_t timer;
+    crypto_t *crypto;
     OpusEncoder *enc;
     OpusDecoder *dec;
     ringbuf_t *rb;
@@ -68,7 +72,7 @@ static audio_callback_result_t on_record(const void *src, size_t srclen, void *u
     packet_client_header_t hdr = {.idx = ctx->idx, .type = PACKET_TYPE_DATA};
     ptr += packet_client_header_write(ptr, tail - ptr, &hdr);
 
-    int res = callback_write_record(src, srclen, ctx->params, ctx->enc, ptr, tail - ptr, &message);
+    int res = callback_write_record(src, srclen, ctx->crypto, ctx->params, ctx->enc, ptr, tail - ptr, &message);
     if (res < 0) {
         log_error("Failed to write data packet: %s", message);
         return AUDIO_STREAM_ABORT;
@@ -101,9 +105,9 @@ static void on_finished(void *userdata) {
     running = false;
 }
 
-static void handle_data(context_t *ctx, const void *buf, size_t buflen) {
+static void handle_data(context_t *ctx, char *buf, size_t srclen, size_t buflen) {
     const char *message;
-    int res = callback_read_ringbuf(buf, buflen, ctx->params, ctx->dec, ctx->rb, &message);
+    int res = callback_read_ringbuf(buf, srclen, buflen, ctx->crypto, ctx->params, ctx->dec, ctx->rb, &message);
     if (res < 0)
         log_error("Handling data packet error: %s", message);
 }
@@ -117,17 +121,24 @@ static int application_loop(int flags,
                             const audio_stream_params_t *params,
                             ringbuf_t *rb) {
     int rc = EXIT_SUCCESS;
+    int err;
     const char *message;
     audio_stream_t *stream = NULL;
+    crypto_t crypto = {0};
     context_t ctx = {
         .rb = rb,
         .params = params,
+        .crypto = &crypto,
         .enc = NULL,
         .dec = NULL,
     };
 
+    if (flags & STREAMCFG_FLAG_ENCRYPTED)
+        crypto_init_sodium(&crypto, 0);
+    else
+        crypto_init_plaintext(&crypto);
+
     if (flags & STREAMCFG_FLAG_CODEC_OPUS) {
-        int err;
         ctx.enc = opus_encoder_create(params->sample_rate, params->channels, OPUS_APPLICATION, &err);
         if (err) {
             log_fatal("Failed to create Opus encoder: %s", opus_strerror(err));
@@ -155,13 +166,18 @@ static int application_loop(int flags,
         goto fail;
     }
 
-    char buf[SOCKET_BUFSIZE] = HANDSHAKE_MAGIC_STRING;
+    char buf[SOCKET_BUFSIZE];
     size_t buflen = sizeof(buf);
 
-    char *ptr = buf + HANDSHAKE_MAGIC_STRING_LEN;
+    char *ptr = buf + packet_handshake_write(buf, buflen);
     char *tail = buf + buflen;
+
     packet_config_t config = {.flags = flags};
     ptr += packet_config_write(ptr, tail - ptr, &config);
+
+    size_t keylen;
+    const char *key = crypto_pubkey(&crypto, &keylen);
+    ptr += packet_write(ptr, tail - ptr, key, keylen);
 
     int handshake_success = 0;
     for (int i = 0; i < HANDSHAKE_RETRY; i++) {
@@ -187,8 +203,14 @@ static int application_loop(int flags,
             log_error("Missing client index");
             continue;
         }
-
         ctx.idx = *ptr++;
+
+        ptr += crypto_key_exchange(&crypto, ptr, keylen, &err, &message);
+        if (err) {
+            log_error("Failed to complete key exchange: %s", message);
+            continue;
+        }
+
         handshake_success = 1;
         break;
     }
@@ -238,11 +260,11 @@ static int application_loop(int flags,
         if (res < 1)
             continue;
 
-        const char *ptr = buf;
-        const char *tail = buf + res;
+        char *ptr = buf;
+        char *tail = buf + res;
         switch (*ptr++) {
         case PACKET_TYPE_DATA:
-            handle_data(&ctx, ptr, tail - ptr);
+            handle_data(&ctx, ptr, tail - ptr, buflen);
             break;
         case PACKET_TYPE_CLOSE:
             running = false;
@@ -286,35 +308,50 @@ cleanup:
         opus_decoder_destroy(ctx.dec);
     if (ctx.enc)
         opus_encoder_destroy(ctx.enc);
+    crypto_deinit(&crypto);
 
     return rc;
 }
 
 noreturn static void usage(int rc) {
     fprintf(stderr,
-            "Usage: ongaku-client [-pdiofx] <server-addr>\n"
+            "Usage: ongaku-client [-hpdiofcs] <server-addr>\n"
             "   -h              print this help\n"
             "   -p port         use different port to connect to the server\n"
             "   -d direction    specifiy direction of the stream: in, out, duplex\n"
             "   -i device       use input device name\n"
             "   -o device       use output device name\n"
             "   -f              use 32-bit float sample format\n"
-            "   -x              disable Opus codec (will cause significantly higher network bandwidth)\n");
+            "   -c              disable Opus codec (will cause significantly higher network bandwidth)\n"
+            "   -s              disable encryption (audio stream will be susceptible to eavesdropping)\n");
     exit(EXIT_FAILURE);
 }
 
 int main(int argc, char *argv[]) {
-    log_init();
-
-    const char *message;
     int rc = EXIT_SUCCESS;
+    const char *message;
+
+    log_init();
+    if (crypto_sodium_init()) {
+        log_fatal("Failed to initialize libsodium");
+        return EXIT_FAILURE;
+    }
+    if (socket_init(&message)) {
+        log_fatal("Failed to initialize socket: %s", message);
+        return EXIT_FAILURE;
+    }
+    if (audio_init(&message)) {
+        log_fatal("Failed to initialize audio: %s", message);
+        goto fail;
+    }
+
     const char *indev = NULL;
     const char *outdev = NULL;
     uint16_t port = DEFAULT_PORT;
     int flags = DEFAULT_STREAMCFG_FLAGS;
 
     int opt;
-    while ((opt = getopt(argc, argv, "hp:d:i:o:fx")) != -1) {
+    while ((opt = getopt(argc, argv, "hp:d:i:o:fcs")) != -1) {
         switch (opt) {
         case 'h':
             usage(EXIT_SUCCESS);
@@ -336,13 +373,18 @@ int main(int argc, char *argv[]) {
         case 'f':
             flags |= STREAMCFG_FLAG_SAMPLE_F32;
             break;
-        case 'x':
+        case 'c':
             flags &= ~STREAMCFG_FLAG_CODEC_OPUS;
+            break;
+        case 's':
+            flags &= ~STREAMCFG_FLAG_ENCRYPTED;
             break;
         default:
             usage(EXIT_FAILURE);
         }
     }
+    log_debug("flags=%d", flags);
+
     if (optind >= argc)
         usage(EXIT_FAILURE);
     const char *host = argv[optind];
@@ -354,15 +396,6 @@ int main(int argc, char *argv[]) {
     } else {
         params.sample_size = sizeof(opus_int16);
         params.sample_format = AUDIO_FORMAT_S16;
-    }
-
-    if (socket_init(&message)) {
-        log_fatal("Failed to initialize socket: %s", message);
-        goto fail;
-    }
-    if (audio_init(&message)) {
-        log_fatal("Failed to initialize audio: %s", message);
-        goto fail;
     }
 
     struct sockaddr_in6 sin6;

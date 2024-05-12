@@ -1,9 +1,7 @@
 app_src = ['src/callbacks.c']
 app_deps = [opus]
 if host_machine.system() == 'windows'
-    app_deps += cc.find_library('ws2_32')
-elif host_machine.system() == 'linux'
-    app_deps += cc.find_library('pulse', required: true)
+    app_deps += ws2_32
 endif
 app_libs = [core, crypto, audio]
 app_includes = [

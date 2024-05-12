@@ -98,7 +98,7 @@ size_t ringbuf_writeptr(ringbuf_t *rb, void **ptr, size_t count) {
     return available;
 }
 
-void ringbuf_advance_readptr(ringbuf_t *rb, size_t off) {
+void ringbuf_commit_read(ringbuf_t *rb, size_t off) {
     if (off <= 0)
         return;
     size_t ridx = rb->ridx;
@@ -116,7 +116,7 @@ void ringbuf_advance_readptr(ringbuf_t *rb, size_t off) {
         rb->full = false;
 }
 
-void ringbuf_advance_writeptr(ringbuf_t *rb, size_t off) {
+void ringbuf_commit_write(ringbuf_t *rb, size_t off) {
     if (off <= 0)
         return;
     size_t widx = rb->widx;
@@ -150,7 +150,7 @@ size_t ringbuf_read(ringbuf_t *rb, void *dst, size_t count) {
             break;
         memcpy(dst + (off * rb->size), ptr, read * rb->size);
         off += read;
-        ringbuf_advance_readptr(rb, read);
+        ringbuf_commit_read(rb, read);
     }
     return off;
 }
@@ -168,7 +168,7 @@ size_t ringbuf_write(ringbuf_t *rb, const void *src, size_t count) {
             break;
         memcpy(ptr, src + (off * rb->size), write * rb->size);
         off += write;
-        ringbuf_advance_writeptr(rb, write);
+        ringbuf_commit_write(rb, write);
     }
     return off;
 }

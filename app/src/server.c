@@ -1,4 +1,7 @@
 #include "callbacks.h"
+#include "crypto/crypto.h"
+#include "crypto/plaintext.h"
+#include "crypto/sodium.h"
 #include "log.h"
 #include "pool.h"
 #include "protocol.h"
@@ -25,7 +28,7 @@ static pool_t pool;
 static socket_t sock = SOCKET_UNDEFINED;
 static atomic_bool running = true;
 static atomic_bool client_removed = false;
-static char buf[SOCKET_BUFSIZE];
+static char rx_buf[SOCKET_BUFSIZE], tx_buf[SOCKET_BUFSIZE];
 
 static void on_signal(int sig) {
 #ifdef _WIN32
@@ -44,7 +47,8 @@ typedef struct {
     socklen_t socklen;
     time_t timer;
     audio_stream_params_t params;
-    const uint8_t *ptr;
+    crypto_t crypto;
+    const uint8_t *iptr;
     struct sockaddr *sa;
     OpusEncoder *enc;
     OpusDecoder *dec;
@@ -68,7 +72,7 @@ static audio_callback_result_t on_record(const void *src, size_t srclen, void *u
     char *tail = c->buf + sizeof(c->buf);
     *ptr++ = PACKET_TYPE_DATA;
 
-    int res = callback_write_record(src, srclen, &c->params, c->enc, ptr, tail - ptr, &message);
+    int res = callback_write_record(src, srclen, &c->crypto, &c->params, c->enc, ptr, tail - ptr, &message);
     if (res < 0) {
         log_error("%s Failed to write data packet: %s", c->addr, message);
         return AUDIO_STREAM_ABORT;
@@ -104,21 +108,58 @@ static void on_finished(void *userdata) {
     client_removed = true;
 }
 
-static client_t *client_new(const uint8_t *ptr,
+static void client_free(client_t *c) {
+    if (c->stream)
+        audio_stream_free(c->stream);
+    if (c->enc)
+        opus_encoder_destroy(c->enc);
+    if (c->rb)
+        ringbuf_free(c->rb);
+    if (c->sa)
+        free(c->sa);
+    crypto_deinit(&c->crypto);
+    free(c);
+}
+
+static client_t *client_new(const uint8_t *iptr,
                             const struct sockaddr *sa,
                             socklen_t socklen,
-                            int flags,
+                            const char *addr,
+                            const char *buf,
+                            size_t buflen,
                             const char **message) {
     assert(socklen >= sizeof(struct sockaddr));
 
+    packet_config_t cfg = {.flags = DEFAULT_STREAMCFG_FLAGS};
+    const char *ptr = buf + packet_config_read(buf, buflen, &cfg);
+    const char *tail = buf + buflen;
+    log_debug("%s flags=%d", addr, cfg.flags);
+
     client_t *c = malloc_zero(sizeof(client_t));
-    c->idx = *ptr;
-    c->ptr = ptr;
-    c->flags = flags;
+    c->idx = *iptr;
+    c->iptr = iptr;
     c->socklen = socklen;
+    c->flags = cfg.flags;
+
+    crypto_t *cc = &c->crypto;
+    if (c->flags & STREAMCFG_FLAG_ENCRYPTED)
+        crypto_init_sodium(cc, 1);
+    else
+        crypto_init_plaintext(cc);
+
+    size_t keylen = crypto_pubkey_size(cc);
+    if (tail - ptr < keylen) {
+        *message = "Invalid public key size";
+        goto fail;
+    }
+
+    int err;
+    ptr += crypto_key_exchange(cc, ptr, keylen, &err, message);
+    if (err)
+        goto fail;
 
     audio_stream_params_t params = DEFAULT_AUDIO_STREAM_PARAMS(APPLICATION_NAME);
-    if (flags & STREAMCFG_FLAG_SAMPLE_F32) {
+    if (c->flags & STREAMCFG_FLAG_SAMPLE_F32) {
         params.sample_size = sizeof(float);
         params.sample_format = AUDIO_FORMAT_F32;
     } else {
@@ -127,17 +168,17 @@ static client_t *client_new(const uint8_t *ptr,
     }
     memcpy(&c->params, &params, sizeof(params));
 
-    if (flags & STREAMCFG_FLAG_CODEC_OPUS) {
+    if (c->flags & STREAMCFG_FLAG_CODEC_OPUS) {
         int err;
         c->enc = opus_encoder_create(params.sample_rate, params.channels, OPUS_APPLICATION, &err);
         if (err) {
             SET_MESSAGE(message, opus_strerror(err));
-            return NULL;
+            goto fail;
         }
         c->dec = opus_decoder_create(params.sample_rate, params.channels, &err);
         if (err) {
             SET_MESSAGE(message, opus_strerror(err));
-            return NULL;
+            goto fail;
         }
     }
 
@@ -145,11 +186,14 @@ static client_t *client_new(const uint8_t *ptr,
     c->stream = audio_stream_new(&c->params);
     c->rb =
         ringbuf_new(audio_stream_frame_count(&c->params, FRAME_BUFFER_DURATION), audio_stream_frame_size(&c->params));
-
+    strcpy(c->addr, addr);
     time(&c->timer);
-    strsockaddr_r(sa, socklen, c->addr, sizeof(c->addr));
 
     return c;
+
+fail:
+    client_free(c);
+    return NULL;
 }
 
 static int client_start(client_t *c, const char *indev, const char *outdev, const char **message) {
@@ -193,19 +237,11 @@ static int client_stop(client_t *c, const char **message) {
     return 0;
 }
 
-static void client_free(client_t *c) {
-    if (c->stream)
-        audio_stream_free(c->stream);
-    if (c->enc)
-        opus_encoder_destroy(c->enc);
-    if (c->rb)
-        ringbuf_free(c->rb);
-    if (c->sa)
-        free(c->sa);
-    free(c);
-}
-
-static client_t *add_client(const struct sockaddr *sa, socklen_t socklen, const char *addr, int flags) {
+static client_t *add_client(const struct sockaddr *sa,
+                            socklen_t socklen,
+                            const char *addr,
+                            const char *buf,
+                            size_t buflen) {
     const char *message;
 
     uint8_t *ptr = (uint8_t *)pool_get(&pool);
@@ -214,34 +250,15 @@ static client_t *add_client(const struct sockaddr *sa, socklen_t socklen, const 
         return NULL;
     }
 
-    client_t *c = client_new(ptr, sa, socklen, flags, &message);
+    client_t *c = client_new(ptr, sa, socklen, addr, buf, buflen, &message);
     if (!c) {
-        log_error("%s Failed to create client: %s", message);
+        log_error("%s Failed to create client: %s", addr, message);
         return NULL;
     }
-
-    memcpy(c->buf, HANDSHAKE_MAGIC_STRING, HANDSHAKE_MAGIC_STRING_LEN);
-    c->buf[HANDSHAKE_MAGIC_STRING_LEN] = c->idx;
-    if (sendto(sock, c->buf, HANDSHAKE_MAGIC_STRING_LEN + 1, 0, c->sa, c->socklen) < 0) {
-        log_error("%s Failed to send handshake response: %s", c->addr, socket_strerror());
-        goto fail;
-    }
-
-    if (client_start(c, NULL, NULL, &message)) {
-        log_error("%s Failed to start client: %s", c->addr, message);
-        goto fail;
-    }
-    log_info("%s Client started", addr);
-
     clients[c->idx] = c;
     log_debug("%s Client added, index: %d", addr, c->idx);
 
     return c;
-
-fail:
-    client_free(c);
-    pool_put(&pool, ptr);
-    return NULL;
 }
 
 static void remove_client(client_t *c) {
@@ -259,7 +276,7 @@ static void remove_client(client_t *c) {
     if (sendto(sock, (char *)&flag, sizeof(flag), 0, c->sa, c->socklen) < 0)
         log_error("%s Failed to send close packet: %s", c->addr, socket_strerror());
 
-    pool_put(&pool, (void *)c->ptr);
+    pool_put(&pool, (void *)c->iptr);
     client_free(c);
 }
 
@@ -267,30 +284,61 @@ static void send_heartbeat(client_t *c) {
     packet_server_header_t hdr = {.type = PACKET_TYPE_HEARTBEAT};
     uint32_t timer = htonl(time(NULL));
 
-    char *ptr = buf;
-    ptr += packet_server_header_write(buf, sizeof(buf), &hdr);
+    size_t buflen = sizeof(tx_buf);
+    char *buf = tx_buf;
+    char *ptr = buf + packet_server_header_write(buf, buflen, &hdr);
     ptr += memwrite(ptr, &timer, sizeof(timer));
 
     if (sendto(sock, buf, ptr - buf, 0, c->sa, c->socklen) < 0)
         log_error("%s Failed to send heartbeat packet: %s", c->addr, socket_strerror());
 }
 
-static void handle_handshake(const struct sockaddr *sa, socklen_t socklen, const char *buf, size_t buflen) {
-    const char *addr = strsockaddr(sa, socklen);
-    packet_config_t cfg = {.flags = DEFAULT_STREAMCFG_FLAGS};
-    const char *ptr = buf;
-    const char *tail = buf + buflen;
-    ptr += packet_config_read(ptr, tail - ptr, &cfg);
-    log_debug("%s flags=%d", addr, cfg.flags);
+static int send_handshake(client_t *c, const char **message) {
+    size_t buflen = sizeof(tx_buf);
+    char *buf = tx_buf;
+    char *ptr = buf + packet_handshake_write(buf, buflen);
+    char *tail = buf + buflen;
+    *ptr++ = c->idx;
 
-    client_t *client = add_client(sa, socklen, addr, cfg.flags);
-    if (client)
-        log_info("%s Handshake success. Client index: %d", addr, client->idx);
+    size_t keylen;
+    const char *key = crypto_pubkey(&c->crypto, &keylen);
+    ptr += packet_write(ptr, tail - ptr, key, keylen);
+
+    if (sendto(sock, buf, ptr - buf, 0, c->sa, c->socklen) < 0) {
+        SET_MESSAGE(message, socket_strerror());
+        return -1;
+    }
+
+    log_info("%s Handshake success. Client index: %d", c->addr, c->idx);
+    return 0;
 }
 
-static void handle_data(client_t *c, const char *buf, size_t buflen) {
+static void handle_handshake(const struct sockaddr *sa, socklen_t socklen, const char *src, size_t srclen) {
+    const char *addr = strsockaddr(sa, socklen);
+    client_t *client = add_client(sa, socklen, addr, src, srclen);
+    if (!client)
+        return;
+
     const char *message;
-    int res = callback_read_ringbuf(buf, buflen, &c->params, c->dec, c->rb, &message);
+    if (send_handshake(client, &message)) {
+        log_error("%s Failed to send handshake response: %s", addr, message);
+        goto fail;
+    }
+    if (client_start(client, NULL, NULL, &message)) {
+        log_error("%s Failed to start client: %s", client->addr, message);
+        goto fail;
+    }
+    log_info("%s Client started", addr);
+    return;
+
+fail:
+    if (client)
+        remove_client(client);
+}
+
+static void handle_data(client_t *c, char *buf, size_t srclen, size_t buflen) {
+    const char *message;
+    int res = callback_read_ringbuf(buf, srclen, buflen, &c->crypto, &c->params, c->dec, c->rb, &message);
     if (res < 0)
         log_error("%s Handling data packet error: %s", c->addr, message);
 }
@@ -326,13 +374,17 @@ int main() {
     int rc = EXIT_SUCCESS;
 
     log_init();
+    if (crypto_sodium_init()) {
+        log_fatal("Failed to initialize libsodium");
+        return EXIT_FAILURE;
+    }
     if (socket_init(&message)) {
         log_fatal("Failed to initialize socket: %s", message);
         return EXIT_FAILURE;
     }
     if (audio_init(&message)) {
         log_fatal("Failed to initialize audio: %s", message);
-        goto fail;
+        goto fail; /* Socket has already been initialized, so we use goto fail */
     }
 
     pool_init(&pool, sizeof(uint8_t), MAX_CLIENTS);
@@ -362,11 +414,12 @@ int main() {
     signal(SIGINT, on_signal);
     socket_set_timeout(sock, 1, &message);
 
-    char buf[SOCKET_BUFSIZE];
+    size_t buflen = sizeof(rx_buf);
+    char *buf = rx_buf;
     packet_client_header_t hdr;
     while (running) {
         socklen = sizeof(sin6);
-        int res = recvfrom(sock, buf, sizeof(buf), 0, sa, &socklen);
+        int res = recvfrom(sock, buf, buflen, 0, sa, &socklen);
         if (res < 0 && !socket_error_timeout()) {
             log_fatal("Failed to receive packet: %s", socket_strerror());
             goto fail;
@@ -377,8 +430,8 @@ int main() {
         if (res <= 0)
             continue;
 
-        const char *ptr = buf + packet_handshake_check(buf, res);
-        const char *tail = buf + res;
+        char *ptr = buf + packet_handshake_check(buf, res);
+        char *tail = buf + res;
         if (ptr != buf) { /* Pointer sliding, this is a handshake packet */
             handle_handshake(sa, socklen, ptr, tail - ptr);
             continue;
@@ -395,7 +448,7 @@ int main() {
 
         switch (hdr.type) {
         case PACKET_TYPE_DATA:
-            handle_data(client, ptr, tail - ptr);
+            handle_data(client, ptr, tail - ptr, buflen);
             break;
         case PACKET_TYPE_CLOSE:
             remove_client(client);

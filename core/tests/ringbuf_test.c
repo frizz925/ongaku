@@ -24,14 +24,14 @@ int main() {
     base = 10;
     for (value = base; value < base + req; value++)
         *ptr++ = value;
-    ringbuf_advance_writeptr(rb, req);
+    ringbuf_commit_write(rb, req);
 
     size = ringbuf_readptr(rb, (void *)&ptr);
     assert(size == req);
 
     for (int i = base; i < base + size; i++)
         assert(*ptr++ == i);
-    ringbuf_advance_readptr(rb, size);
+    ringbuf_commit_read(rb, size);
 
     assert(ringbuf_empty(rb));
     assert(ringbuf_available(rb) == cap);

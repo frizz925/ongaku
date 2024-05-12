@@ -7,7 +7,7 @@ core_src = [
 ]
 core_deps = []
 if host_machine.system() == 'windows'
-    core_deps += compiler.find_library('ws2_32')
+    core_deps += ws2_32
 endif
 core_include = include_directories('include')
 core_includes = [util_include, core_include]
