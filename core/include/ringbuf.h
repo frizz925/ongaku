@@ -1,3 +1,6 @@
+#ifndef _RINGBUF_H
+#define _RINGBUF_H
+
 #include <stddef.h>
 
 typedef struct ringbuf ringbuf_t;
@@ -19,3 +22,5 @@ size_t ringbuf_read(ringbuf_t *rb, void *dst, size_t count);
 size_t ringbuf_write(ringbuf_t *rb, const void *src, size_t count);
 void ringbuf_clear(ringbuf_t *rb);
 void ringbuf_free(ringbuf_t *rb);
+
+#endif

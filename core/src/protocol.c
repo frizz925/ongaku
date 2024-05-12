@@ -22,15 +22,15 @@ size_t packet_config_write(char *buf, size_t buflen, const packet_config_t *src)
     return cfglen;
 }
 
-size_t packet_server_header_write(char *buf, size_t buflen, const packet_server_header_t *src) {
-    size_t hdrlen = sizeof(packet_server_header_t);
+size_t packet_client_header_write(char *buf, size_t buflen, const packet_client_header_t *src) {
+    size_t hdrlen = sizeof(packet_client_header_t);
     if (buflen < hdrlen)
         return 0;
     return memwrite(buf, src, hdrlen);
 }
 
-size_t packet_client_header_write(char *buf, size_t buflen, const packet_client_header_t *src) {
-    size_t hdrlen = sizeof(packet_client_header_t);
+size_t packet_server_header_write(char *buf, size_t buflen, const packet_server_header_t *src) {
+    size_t hdrlen = sizeof(packet_server_header_t);
     if (buflen < hdrlen)
         return 0;
     return memwrite(buf, src, hdrlen);
@@ -63,15 +63,15 @@ size_t packet_config_read(const char *buf, size_t buflen, packet_config_t *dst) 
     return cfglen;
 }
 
-size_t packet_server_header_read(const char *buf, size_t buflen, packet_server_header_t *dst) {
-    size_t hdrlen = sizeof(packet_server_header_t);
+size_t packet_client_header_read(const char *buf, size_t buflen, packet_client_header_t *dst) {
+    size_t hdrlen = sizeof(packet_client_header_t);
     if (buflen < hdrlen)
         return 0;
     return memwrite(dst, buf, hdrlen);
 }
 
-size_t packet_client_header_read(const char *buf, size_t buflen, packet_client_header_t *dst) {
-    size_t hdrlen = sizeof(packet_client_header_t);
+size_t packet_server_header_read(const char *buf, size_t buflen, packet_server_header_t *dst) {
+    size_t hdrlen = sizeof(packet_server_header_t);
     if (buflen < hdrlen)
         return 0;
     return memwrite(dst, buf, hdrlen);

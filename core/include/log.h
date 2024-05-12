@@ -1,8 +1,6 @@
 #ifndef _LOG_H
 #define _LOG_H
 
-#include <stdarg.h>
-
 enum log_level {
     LOG_TRACE,
     LOG_DEBUG,
