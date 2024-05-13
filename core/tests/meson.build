@@ -3,6 +3,7 @@ test(
     executable(
         'pool_test',
         sources: ['../src/pool.c', 'pool_test.c'],
+        dependencies: core_deps,
         include_directories: core_includes,
     ),
 )
@@ -12,6 +13,7 @@ test(
     executable(
         'ringbuf_test',
         sources: ['../src/ringbuf.c', 'ringbuf_test.c'],
+        dependencies: core_deps,
         include_directories: core_includes,
     ),
 )
@@ -21,6 +23,7 @@ test(
     executable(
         'protocol_test',
         sources: ['../src/protocol.c', 'protocol_test.c'],
+        dependencies: core_deps,
         include_directories: core_includes,
     ),
 )

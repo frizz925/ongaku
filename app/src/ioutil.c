@@ -4,6 +4,8 @@
 #include <assert.h>
 
 #ifdef _WIN32
+#include <stdint.h>
+#include <winsock2.h>
 #else
 #include <arpa/inet.h>
 #endif
