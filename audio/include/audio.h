@@ -63,7 +63,6 @@ typedef void (*audio_finished_callback_t)(void *userdata);
 size_t audio_stream_frame_size(const audio_stream_params_t *params);
 size_t audio_stream_frame_count(const audio_stream_params_t *params, double duration);
 size_t audio_stream_frame_bufsize(const audio_stream_params_t *params, double duration);
-size_t audio_buffer_frame_count();
 
 int audio_init(const char **message);
 int audio_terminate(const char **message);
