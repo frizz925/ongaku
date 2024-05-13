@@ -23,7 +23,6 @@
 static pool_t pool;
 static socket_t sock = SOCKET_UNDEFINED;
 static atomic_bool running = true;
-static atomic_bool client_removed = false;
 static char tx_buf[SOCKET_BUFSIZE];
 
 static void on_signal(int sig) {
@@ -108,10 +107,6 @@ static void send_heartbeat(client_t *c) {
 static audio_callback_result_t on_record(const void *src, size_t srclen, void *userdata) {
     const char *message;
     client_t *c = userdata;
-    if (time(NULL) - c->timer > STREAM_TIMEOUT_SECONDS) {
-        log_info("%s Client timeout", c->addr);
-        return AUDIO_STREAM_COMPLETE;
-    }
 
     char *buf = c->buf;
     size_t buflen = sizeof(c->buf);
@@ -153,7 +148,6 @@ static void on_error(const char *message, void *userdata) {
 static void on_finished(void *userdata) {
     client_t *c = userdata;
     c->removed = true;
-    client_removed = true;
 }
 
 static void client_free(client_t *c) {
@@ -360,25 +354,12 @@ static void handle_data(client_t *c, char *src, size_t srclen) {
         log_warn("%s Handling data packet warning: %s", c->addr, message);
 }
 
-static void handle_client_removal() {
-    if (!client_removed)
-        return;
-    for (int i = 0; i < MAX_CLIENTS; i++) {
-        client_t *c = clients[i];
-        if (!c || !c->removed)
-            continue;
+static void handle_client_removal(client_t *c) {
+    if (time(NULL) - c->timer > STREAM_TIMEOUT_SECONDS) {
+        log_info("%s Client timeout", c->addr);
         remove_client(c);
-    }
-    client_removed = false;
-}
-
-static void handle_client_heartbeat() {
-    for (int i = 0; i < MAX_CLIENTS; i++) {
-        client_t *c = clients[i];
-        if (!c)
-            continue;
-        send_heartbeat(c);
-    }
+    } else if (c->removed)
+        remove_client(c);
 }
 
 int main() {
@@ -431,10 +412,15 @@ int main() {
     time_t timer = time(NULL);
     while (running) {
         if (time(NULL) - timer >= HEARTBEAT_INTERVAL_SECONDS) {
-            handle_client_heartbeat();
+            for (int i = 0; i < MAX_CLIENTS; i++) {
+                client_t *c = clients[i];
+                if (!c)
+                    continue;
+                handle_client_removal(c);
+                send_heartbeat(c);
+            }
             time(&timer);
         }
-        handle_client_removal();
 
         socklen = sizeof(sin6);
         int res = recvfrom(sock, buf, buflen, 0, sa, &socklen);
