@@ -266,6 +266,7 @@ audio_stream_t *audio_stream_new(const audio_stream_params_t *params) {
 
 void audio_stream_init(audio_stream_t *stream, const audio_stream_params_t *params) {
     assert(mainloop != NULL);
+    mainloop_lock();
     memset(stream, 0, audio_stream_sizeof());
 
     stream->sample_spec.format = params->sample_format == AUDIO_FORMAT_F32 ? PA_SAMPLE_FLOAT32LE : PA_SAMPLE_S16LE;
@@ -283,6 +284,7 @@ void audio_stream_init(audio_stream_t *stream, const audio_stream_params_t *para
 
     stream->record.stream = stream;
     stream->playback.stream = stream;
+    mainloop_unlock();
 }
 
 audio_stream_state_t audio_stream_get_state(audio_stream_t *stream) {
@@ -307,8 +309,8 @@ int audio_stream_connect(audio_stream_t *stream, const char **message) {
     while (pa_context_get_state(stream->pa_context) != PA_CONTEXT_READY)
         pa_threaded_mainloop_wait(mainloop);
 
-    mainloop_unlock();
     stream->connected = true;
+    mainloop_unlock();
     return 0;
 
 fail:
@@ -352,46 +354,60 @@ int audio_stream_open_playback(audio_stream_t *stream,
 }
 
 int audio_stream_start(audio_stream_t *stream, const char **message) {
+    mainloop_lock();
+    int res = 0;
     if (context_start((stream_context_t *)&stream->record, message))
-        return -1;
+        res = -1;
     if (context_start((stream_context_t *)&stream->playback, message))
-        return -1;
-    return 0;
+        res = -1;
+    mainloop_unlock();
+    return res;
 }
 
 int audio_stream_stop(audio_stream_t *stream, const char **message) {
+    mainloop_lock();
+    int res = 0;
     if (context_stop((stream_context_t *)&stream->record, message))
-        return -1;
+        res = -1;
     if (context_stop((stream_context_t *)&stream->playback, message))
-        return -1;
-    return 0;
+        res = -1;
+    mainloop_unlock();
+    return res;
 }
 
 int audio_stream_close_record(audio_stream_t *stream, const char **message) {
+    mainloop_lock();
     context_deinit((stream_context_t *)&stream->record);
+    mainloop_unlock();
     return 0;
 }
 
 int audio_stream_close_playback(audio_stream_t *stream, const char **message) {
+    mainloop_lock();
     context_deinit((stream_context_t *)&stream->playback);
+    mainloop_unlock();
     return 0;
 }
 
 int audio_stream_disconnect(audio_stream_t *stream, const char **message) {
     if (!stream->connected)
         return 0;
+    mainloop_lock();
     pa_context_disconnect(stream->pa_context);
     stream->connected = false;
+    mainloop_unlock();
     return 0;
 }
 
 void audio_stream_deinit(audio_stream_t *stream) {
+    mainloop_lock();
     if (stream->pa_context)
         pa_context_unref(stream->pa_context);
 
     stream->record.pa_stream = NULL;
     stream->playback.pa_stream = NULL;
     stream->pa_context = NULL;
+    mainloop_unlock();
 }
 
 void audio_stream_free(audio_stream_t *stream) {
