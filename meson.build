@@ -1,7 +1,7 @@
 project(
     'ongaku',
     'c',
-    default_options: ['c_std=c2x'],
+    default_options: ['c_std=c17'],
 )
 
 cc = meson.get_compiler('c')

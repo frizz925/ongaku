@@ -16,6 +16,7 @@
 #include <assert.h>
 #include <signal.h>
 #include <stdatomic.h>
+#include <stdbool.h>
 #include <stdio.h>
 #include <stdnoreturn.h>
 #include <strings.h>
@@ -426,9 +427,8 @@ int main(int argc, char *argv[]) {
         params.sample_format = AUDIO_FORMAT_S16;
     }
 
-    if (flags & STREAMCFG_FLAG_CODEC_OPUS) {
+    if (flags & STREAMCFG_FLAG_CODEC_OPUS)
         params.in_frame_duration = FRAME_OPUS_DURATION;
-    }
 
     struct sockaddr_in6 sin6;
     struct sockaddr *sa = (struct sockaddr *)&sin6;

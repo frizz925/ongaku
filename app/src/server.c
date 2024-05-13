@@ -17,6 +17,7 @@
 #include <assert.h>
 #include <signal.h>
 #include <stdatomic.h>
+#include <stdbool.h>
 #include <time.h>
 
 #define APPLICATION_NAME "Ongaku"
