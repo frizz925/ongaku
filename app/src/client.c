@@ -1,3 +1,5 @@
+#define _POSIX_C_SOURCE 200809L
+
 #include "callbacks.h"
 #include "crypto/crypto.h"
 #include "crypto/plaintext.h"
@@ -11,12 +13,14 @@
 #include <opus/opus.h>
 
 #include <assert.h>
+#include <bits/getopt_core.h>
 #include <signal.h>
 #include <stdatomic.h>
 #include <stdbool.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <stdnoreturn.h>
+#include <strings.h>
 #include <time.h>
 #include <unistd.h>
 

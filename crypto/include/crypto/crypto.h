@@ -1,6 +1,8 @@
 #ifndef _CRYPTO_H
 #define _CRYPTO_H
 
+#include "util.h"
+
 #include <stddef.h>
 
 typedef struct crypto {
@@ -14,7 +16,7 @@ typedef struct crypto {
 } crypto_t;
 
 static int not_implemented(const char **message) {
-    *message = "Not implemented";
+    SET_MESSAGE(message, "Not implemented");
     return -1;
 }
 

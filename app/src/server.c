@@ -1,3 +1,5 @@
+#define _POSIX_C_SOURCE 200809L
+
 #include "callbacks.h"
 #include "crypto/crypto.h"
 #include "crypto/plaintext.h"
@@ -160,7 +162,6 @@ static client_t *client_new(const uint8_t *iptr,
     int res = crypto_key_exchange(cc, ptr, keylen, message);
     if (res < 0)
         goto fail;
-    ptr += res;
 
     audio_stream_params_t params = DEFAULT_AUDIO_STREAM_PARAMS(APPLICATION_NAME);
     if (c->flags & STREAMCFG_FLAG_SAMPLE_F32) {
@@ -192,7 +193,7 @@ static client_t *client_new(const uint8_t *iptr,
     c->stream = audio_stream_new(&c->params);
     c->rb =
         ringbuf_new(audio_stream_frame_count(&c->params, FRAME_BUFFER_DURATION), audio_stream_frame_size(&c->params));
-    strcpy(c->addr, addr);
+    strncpy(c->addr, addr, sizeof(c->addr));
     time(&c->timer);
 
     return c;

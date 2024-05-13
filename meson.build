@@ -1,4 +1,9 @@
-project('ongaku', 'c')
+project(
+    'ongaku',
+    'c',
+    default_options: ['c_std=c2x'],
+)
+
 cc = meson.get_compiler('c')
 
 opus = cc.find_library('opus')

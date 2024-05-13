@@ -1,3 +1,5 @@
+#define _POSIX_C_SOURCE 200112L
+
 #include "socket.h"
 #include "util.h"
 
@@ -58,6 +60,9 @@ int socket_terminate(const char **message) {
 
 #include <errno.h>
 #include <netdb.h>
+#include <sys/socket.h>
+#include <sys/time.h>
+#include <sys/types.h>
 #include <unistd.h>
 
 #define ERRMSG_EAFNOSUPPORT strerror(EAFNOSUPPORT);
