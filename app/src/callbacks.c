@@ -2,94 +2,73 @@
 #include "protocol.h"
 #include "util.h"
 
+#include <assert.h>
 #include <stdio.h>
 
 int callback_write_record(const void *src,
                           size_t srclen,
-                          crypto_t *crypto,
                           const audio_stream_params_t *params,
                           OpusEncoder *enc,
-                          char *buf,
-                          size_t buflen,
+                          void *dst,
+                          size_t dstlen,
                           const char **message) {
     size_t frame_size = audio_stream_frame_size(params);
     size_t frame_count = srclen / frame_size;
 
-    char *base = buf + packet_data_size_write(buf, buflen, 0);
-    char *tail = buf + buflen;
-    char *ptr = base + packet_audio_header_write(base, tail - base, frame_count);
+    void *tail = dst + dstlen;
+    void *ptr = dst + packet_audio_header_write(dst, dstlen, frame_count);
+    size_t buflen = tail - ptr;
 
     int res;
     if (enc) {
         res = params->sample_format == AUDIO_FORMAT_F32
-                  ? opus_encode_float(enc, (float *)src, frame_count, (unsigned char *)ptr, tail - ptr)
-                  : opus_encode(enc, (opus_int16 *)src, frame_count, (unsigned char *)ptr, tail - ptr);
+                  ? opus_encode_float(enc, (float *)src, frame_count, (unsigned char *)ptr, buflen)
+                  : opus_encode(enc, (opus_int16 *)src, frame_count, (unsigned char *)ptr, buflen);
         if (res < 0) {
             SET_MESSAGE(message, opus_strerror(res));
             return -1;
         }
     } else {
-        if (tail - ptr < srclen) {
-            SET_MESSAGE(message, "Buffer too small!");
-            return -1;
-        }
+        assert(buflen >= srclen);
         memcpy(ptr, src, srclen);
         res = srclen;
     }
 
-    size_t size = crypto_encrypt(crypto, base, ptr - base + res, base, tail - base);
-    return size + packet_data_size_write(buf, base - buf, size);
+    return ptr + res - dst;
 }
 
-int callback_read_playback(void *dst, size_t *result, ringbuf_t *rb, const char **message) {
-    size_t dstlen = *result;
+int callback_read_playback(void *dst, size_t *dstlen, ringbuf_t *rb, const char **message) {
+    size_t buflen = *dstlen;
     size_t size = ringbuf_size(rb);
-    size_t frames = dstlen / size;
+    size_t frames = buflen / size;
     if (ringbuf_remaining(rb) < frames) {
         SET_MESSAGE(message, "Ring buffer underflow!");
         memset(dst, 0, frames * size);
         return 1;
     }
     size_t len = ringbuf_read(rb, dst, frames);
-    *result = len * size;
+    *dstlen = len * size;
     return len;
 }
 
-int callback_read_ringbuf(char *src,
+int callback_read_ringbuf(const void *src,
                           size_t srclen,
-                          size_t buflen,
-                          crypto_t *crypto,
                           const audio_stream_params_t *params,
                           OpusDecoder *dec,
                           ringbuf_t *rb,
                           const char **message) {
-    size_t size;
-    const char *tail = src + srclen;
-    const char *ptr = src + packet_data_size_read(src, srclen, &size);
-    if (size <= 0 || size > tail - ptr) {
-        SET_MESSAGE(message, "Invalid data size");
-        return -1;
-    }
-    buflen = src + buflen - ptr;
-
-    int err;
-    char *buf = (char *)ptr;
-    ptr += crypto_decrypt(crypto, ptr, size, buf, &buflen, &err, message);
-    if (err)
-        return -1;
-    size_t len = ptr - src;
-
     uint16_t frames_in;
-    ptr = buf + packet_audio_header_read(buf, buflen, &frames_in);
-    tail = buf + buflen;
+    const char *tail = src + srclen;
+    const char *ptr = src + packet_audio_header_read(src, srclen, &frames_in);
     if (frames_in <= 0) {
         SET_MESSAGE(message, "Invalid data header");
         return -1;
     }
+    size_t len = tail - ptr;
 
     /* No Opus decoder, just write directly */
     if (!dec) {
-        if (frames_in * audio_stream_frame_size(params) > tail - ptr) {
+        if (frames_in * audio_stream_frame_size(params) > len) {
             SET_MESSAGE(message, "Invalid frame count");
             return -1;
         }
@@ -98,11 +77,11 @@ int callback_read_ringbuf(char *src,
             return -1;
         }
         ringbuf_write(rb, ptr, frames_in);
-        return len;
+        return srclen;
     }
 
-    void *rbptr;
-    size_t frames_out = ringbuf_writeptr(rb, &rbptr, frames_in);
+    void *buf;
+    size_t frames_out = ringbuf_writeptr(rb, &buf, frames_in);
     if (frames_out < frames_in) {
         SET_MESSAGE(message, "Ring buffer overflow!");
         fprintf(stderr, "frames_in=%d frames_out=%zu\n", frames_in, frames_out);
@@ -110,13 +89,13 @@ int callback_read_ringbuf(char *src,
     }
 
     int res = params->sample_format == AUDIO_FORMAT_F32
-                  ? opus_decode_float(dec, (unsigned char *)ptr, tail - ptr, (float *)rbptr, frames_out, 0)
-                  : opus_decode(dec, (unsigned char *)ptr, tail - ptr, (opus_int16 *)rbptr, frames_out, 0);
+                  ? opus_decode_float(dec, (unsigned char *)ptr, len, (float *)buf, frames_out, 0)
+                  : opus_decode(dec, (unsigned char *)ptr, len, (opus_int16 *)buf, frames_out, 0);
     if (res < 0) {
         SET_MESSAGE(message, opus_strerror(res));
         return -1;
     }
 
     ringbuf_commit_write(rb, res);
-    return len;
+    return srclen;
 }

@@ -2,6 +2,7 @@
 #include "crypto/crypto.h"
 #include "crypto/plaintext.h"
 #include "crypto/sodium.h"
+#include "ioutil.h"
 #include "log.h"
 #include "protocol.h"
 #include "socket.h"
@@ -9,6 +10,7 @@
 
 #include <opus/opus.h>
 
+#include <assert.h>
 #include <signal.h>
 #include <stdatomic.h>
 #include <stdbool.h>
@@ -37,7 +39,7 @@ typedef struct {
 
 static socket_t sock = SOCKET_UNDEFINED;
 static atomic_bool running = true;
-static char buf[SOCKET_BUFSIZE];
+static char tx_buf[SOCKET_BUFSIZE];
 
 static void on_signal(int sig) {
 #ifdef _WIN32
@@ -48,16 +50,38 @@ static void on_signal(int sig) {
     running = false;
 }
 
-static void send_heartbeat(socket_t sock, uint8_t idx) {
-    packet_client_header_t hdr = {.idx = idx, .type = PACKET_TYPE_HEARTBEAT};
+static int send_packet(context_t *ctx, uint8_t type, const void *src, size_t srclen, const char **message) {
+    char *buf = tx_buf;
+    size_t buflen = sizeof(tx_buf);
+
+    packet_client_header_t chdr = {.idx = ctx->idx};
+    char *tail = buf + buflen;
+    char *base = buf + packet_client_header_write(buf, buflen, &chdr);
+    buflen = tail - base;
+
+    packet_header_t hdr = {.type = type};
+    char *ptr = base + packet_header_write(base, buflen, &hdr);
+
+    if (src && srclen > 0) {
+        assert(tail - ptr >= srclen);
+        memcpy(ptr, src, srclen);
+        ptr += srclen;
+    }
+    ptr = base + ioutil_encrypt(ctx->crypto, base, buflen, base, ptr - base);
+
+    int res = send(sock, buf, ptr - buf, 0);
+    if (res < 0) {
+        SET_MESSAGE(message, socket_strerror());
+        return -1;
+    }
+    return res;
+}
+
+static void send_heartbeat(context_t *ctx) {
+    const char *message;
     uint32_t timer = htonl(time(NULL));
-
-    char *ptr = buf;
-    ptr += packet_client_header_write(ptr, sizeof(buf), &hdr);
-    ptr += memwrite(ptr, &timer, sizeof(timer));
-
-    if (send(sock, buf, ptr - buf, 0) < 0)
-        log_error("Failed to send heartbeat packet: %s", socket_strerror());
+    if (send_packet(ctx, PACKET_TYPE_HEARTBEAT, &timer, sizeof(timer), &message) < 0)
+        log_error("Failed to send heartbeat packet: %s", message);
 }
 
 static audio_callback_result_t on_record(const void *src, size_t srclen, void *userdata) {
@@ -67,20 +91,15 @@ static audio_callback_result_t on_record(const void *src, size_t srclen, void *u
         return AUDIO_STREAM_COMPLETE;
     }
 
-    char *ptr = ctx->buf;
-    char *tail = ctx->buf + sizeof(ctx->buf);
-    packet_client_header_t hdr = {.idx = ctx->idx, .type = PACKET_TYPE_DATA};
-    ptr += packet_client_header_write(ptr, tail - ptr, &hdr);
-
-    int res = callback_write_record(src, srclen, ctx->crypto, ctx->params, ctx->enc, ptr, tail - ptr, &message);
+    char *buf = ctx->buf;
+    size_t buflen = sizeof(ctx->buf);
+    int res = callback_write_record(src, srclen, ctx->params, ctx->enc, buf, buflen, &message);
     if (res < 0) {
         log_error("Failed to write data packet: %s", message);
         return AUDIO_STREAM_ABORT;
     }
-    ptr += res;
-
-    if (send(sock, ctx->buf, ptr - ctx->buf, 0) < 0) {
-        log_error("Failed to send audio frame: %s", socket_strerror());
+    if (send_packet(ctx, PACKET_TYPE_DATA, buf, res, &message) < 0) {
+        log_error("Failed to send audio frame: %s", message);
         return AUDIO_STREAM_ABORT;
     }
     return AUDIO_STREAM_CONTINUE;
@@ -105,9 +124,9 @@ static void on_finished(void *userdata) {
     running = false;
 }
 
-static void handle_data(context_t *ctx, char *buf, size_t srclen, size_t buflen) {
+static void handle_data(context_t *ctx, char *src, size_t srclen) {
     const char *message;
-    int res = callback_read_ringbuf(buf, srclen, buflen, ctx->crypto, ctx->params, ctx->dec, ctx->rb, &message);
+    int res = callback_read_ringbuf(src, srclen, ctx->params, ctx->dec, ctx->rb, &message);
     if (res < 0)
         log_error("Handling data packet error: %s", message);
 }
@@ -205,8 +224,7 @@ static int application_loop(int flags,
         }
         ctx.idx = *ptr++;
 
-        ptr += crypto_key_exchange(&crypto, ptr, keylen, &err, &message);
-        if (err) {
+        if (crypto_key_exchange(&crypto, ptr, keylen, &message) < 0) {
             log_error("Failed to complete key exchange: %s", message);
             continue;
         }
@@ -246,7 +264,7 @@ static int application_loop(int flags,
     time_t timer = time(NULL);
     while (running) {
         if (time(NULL) - timer > HEARTBEAT_INTERVAL_SECONDS) {
-            send_heartbeat(sock, ctx.idx);
+            send_heartbeat(&ctx);
             time(&timer);
         }
 
@@ -257,14 +275,17 @@ static int application_loop(int flags,
         }
         time((time_t *)&ctx.timer);
 
-        if (res < 1)
+        size_t msglen = buflen;
+        if (ioutil_decrypt(&crypto, buf, res, buf, &msglen, &message) <= 0)
             continue;
 
-        char *ptr = buf;
-        char *tail = buf + res;
-        switch (*ptr++) {
+        packet_header_t hdr;
+        char *tail = buf + msglen;
+        char *ptr = buf + packet_header_read(buf, msglen, &hdr);
+
+        switch (hdr.type) {
         case PACKET_TYPE_DATA:
-            handle_data(&ctx, ptr, tail - ptr, buflen);
+            handle_data(&ctx, ptr, tail - ptr);
             break;
         case PACKET_TYPE_CLOSE:
             running = false;
@@ -272,12 +293,8 @@ static int application_loop(int flags,
         }
     }
 
-    packet_client_header_t hdr = {
-        .idx = ctx.idx,
-        .type = PACKET_TYPE_CLOSE,
-    };
-    if (send(sock, (char *)&hdr, sizeof(hdr), 0) < 0)
-        log_error("Failed to send close packet: %s", socket_strerror());
+    if (send_packet(&ctx, PACKET_TYPE_CLOSE, NULL, 0, &message) < 0)
+        log_error("Failed to send close packet: %s", message);
     goto cleanup;
 
 fail:
@@ -322,8 +339,15 @@ noreturn static void usage(int rc) {
             "   -i device       use input device name\n"
             "   -o device       use output device name\n"
             "   -f              use 32-bit float sample format\n"
-            "   -c              disable Opus codec (will cause significantly higher network bandwidth)\n"
-            "   -s              disable encryption (audio stream will be susceptible to eavesdropping)\n");
+            "   -c              disable Opus codec (see WARNING)\n"
+            "   -s              disable encryption (see DANGER)\n"
+            "\n"
+            "WARNING: Disabling Opus codec will result in slightly smaller delay\n"
+            "and CPU load but significantly higher network bandwidth.\n"
+            "\n"
+            "DANGER: Disabling encryption will make your connection susceptible\n"
+            "to hijacking or even eavesdropping. Make sure to disable this in an\n"
+            "isolated network.\n");
     exit(EXIT_FAILURE);
 }
 

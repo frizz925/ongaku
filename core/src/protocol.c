@@ -48,8 +48,8 @@ size_t packet_client_header_write(char *buf, size_t buflen, const packet_client_
     return packet_write(buf, buflen, src, sizeof(packet_client_header_t));
 }
 
-size_t packet_server_header_write(char *buf, size_t buflen, const packet_server_header_t *src) {
-    return packet_write(buf, buflen, src, sizeof(packet_server_header_t));
+size_t packet_header_write(char *buf, size_t buflen, const packet_header_t *src) {
+    return packet_write(buf, buflen, src, sizeof(packet_header_t));
 }
 
 size_t packet_audio_header_write(char *buf, size_t buflen, uint16_t frames) {
@@ -97,8 +97,8 @@ size_t packet_client_header_read(const char *buf, size_t buflen, packet_client_h
     return packet_read(buf, buflen, dst, sizeof(packet_client_header_t));
 }
 
-size_t packet_server_header_read(const char *buf, size_t buflen, packet_server_header_t *dst) {
-    return packet_read(buf, buflen, dst, sizeof(packet_server_header_t));
+size_t packet_header_read(const char *buf, size_t buflen, packet_header_t *dst) {
+    return packet_read(buf, buflen, dst, sizeof(packet_header_t));
 }
 
 size_t packet_audio_header_read(const char *buf, size_t buflen, uint16_t *frames) {

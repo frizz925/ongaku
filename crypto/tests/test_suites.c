@@ -12,28 +12,23 @@
 #define MESSAGING_LOOP 65536
 
 static void test_suite(crypto_t *c, crypto_t *s) {
-    int err;
     char msg[128] = SAMPLE_MESSAGE;
     size_t msglen = sizeof(SAMPLE_MESSAGE);
 
     size_t spklen;
     const char *spk = crypto_pubkey(s, &spklen);
-    crypto_key_exchange(c, spk, spklen, &err, NULL);
-    assert(err == 0);
+    assert(crypto_key_exchange(c, spk, spklen, NULL) >= 0);
 
     size_t cpklen;
     const char *cpk = crypto_pubkey(c, &cpklen);
-    crypto_key_exchange(s, cpk, cpklen, &err, NULL);
-    assert(err == 0);
+    assert(crypto_key_exchange(s, cpk, cpklen, NULL) >= 0);
 
     for (int i = 0; i < MESSAGING_LOOP; i++) {
         size_t enclen = crypto_encrypt(c, msg, sizeof(SAMPLE_MESSAGE), msg, sizeof(msg));
-        assert(err == 0);
         assert(enclen >= msglen);
 
         msglen = sizeof(msg);
-        size_t declen = crypto_decrypt(s, msg, enclen, msg, &msglen, &err, NULL);
-        assert(err == 0);
+        int declen = crypto_decrypt(s, msg, enclen, msg, &msglen, NULL);
         assert(enclen == declen);
 
         assert(memcmp(msg, SAMPLE_MESSAGE, msglen) == 0);
@@ -51,16 +46,13 @@ static void none_test() {
     assert(pk == NULL);
     assert(pklen == 0);
 
-    int err;
     const char *errmsg;
-    assert(crypto_key_exchange(&c, pk, pklen, &err, &errmsg) == 0);
-    assert(err != 0);
+    assert(crypto_key_exchange(&c, pk, pklen, &errmsg) < 0);
 
     char msg[] = SAMPLE_MESSAGE;
     size_t msglen = sizeof(msg);
     assert(crypto_encrypt(&c, msg, msglen, msg, msglen) == 0);
-    assert(crypto_decrypt(&c, msg, msglen, msg, &msglen, &err, &errmsg) == 0);
-    assert(err != 0);
+    assert(crypto_decrypt(&c, msg, msglen, msg, &msglen, &errmsg) < 0);
 
     crypto_deinit(&c);
 }

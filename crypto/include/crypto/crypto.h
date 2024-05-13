@@ -6,23 +6,16 @@
 typedef struct crypto {
     size_t (*pubkey_size)(void *handle);
     const char *(*pubkey)(void *handle, size_t *len);
-    size_t (*key_exchange)(void *handle, const char *key, size_t keylen, int *err, const char **message);
+    int (*key_exchange)(void *handle, const char *key, size_t keylen, const char **message);
     size_t (*encrypt)(void *handle, const char *src, size_t srclen, char *dst, size_t dstlen);
-    size_t (*decrypt)(void *handle,
-                      const char *src,
-                      size_t srclen,
-                      char *dst,
-                      size_t *dstlen,
-                      int *err,
-                      const char **message);
+    int (*decrypt)(void *handle, const char *src, size_t srclen, char *dst, size_t *dstlen, const char **message);
     void (*deinit)(void *handle);
     void *handle;
 } crypto_t;
 
-static size_t not_implemented(int *err, const char **message) {
-    *err = -1;
+static int not_implemented(const char **message) {
     *message = "Not implemented";
-    return 0;
+    return -1;
 }
 
 static inline size_t crypto_pubkey_size(crypto_t *c) {
@@ -34,24 +27,21 @@ static inline const char *crypto_pubkey(crypto_t *c, size_t *len) {
     return (c->pubkey != NULL) ? c->pubkey(c->handle, len) : NULL;
 }
 
-static inline size_t crypto_key_exchange(crypto_t *c, const char *key, size_t keylen, int *err, const char **message) {
-    return (c->key_exchange != NULL) ? c->key_exchange(c->handle, key, keylen, err, message)
-                                     : not_implemented(err, message);
+static inline int crypto_key_exchange(crypto_t *c, const char *key, size_t keylen, const char **message) {
+    return (c->key_exchange != NULL) ? c->key_exchange(c->handle, key, keylen, message) : not_implemented(message);
 }
 
 static inline size_t crypto_encrypt(crypto_t *c, const char *src, size_t srclen, char *dst, size_t dstlen) {
     return (c->encrypt != NULL) ? c->encrypt(c->handle, src, srclen, dst, dstlen) : 0;
 }
 
-static inline size_t crypto_decrypt(crypto_t *c,
-                                    const char *src,
-                                    size_t srclen,
-                                    char *dst,
-                                    size_t *dstlen,
-                                    int *err,
-                                    const char **message) {
-    return (c->decrypt != NULL) ? c->decrypt(c->handle, src, srclen, dst, dstlen, err, message)
-                                : not_implemented(err, message);
+static inline int crypto_decrypt(crypto_t *c,
+                                 const char *src,
+                                 size_t srclen,
+                                 char *dst,
+                                 size_t *dstlen,
+                                 const char **message) {
+    return (c->decrypt != NULL) ? c->decrypt(c->handle, src, srclen, dst, dstlen, message) : not_implemented(message);
 }
 
 static inline void crypto_deinit(crypto_t *c) {

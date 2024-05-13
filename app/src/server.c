@@ -2,6 +2,7 @@
 #include "crypto/crypto.h"
 #include "crypto/plaintext.h"
 #include "crypto/sodium.h"
+#include "ioutil.h"
 #include "log.h"
 #include "pool.h"
 #include "protocol.h"
@@ -28,7 +29,7 @@ static pool_t pool;
 static socket_t sock = SOCKET_UNDEFINED;
 static atomic_bool running = true;
 static atomic_bool client_removed = false;
-static char rx_buf[SOCKET_BUFSIZE], tx_buf[SOCKET_BUFSIZE];
+static char tx_buf[SOCKET_BUFSIZE];
 
 static void on_signal(int sig) {
 #ifdef _WIN32
@@ -68,18 +69,21 @@ static audio_callback_result_t on_record(const void *src, size_t srclen, void *u
         return AUDIO_STREAM_COMPLETE;
     }
 
-    char *ptr = c->buf;
-    char *tail = c->buf + sizeof(c->buf);
-    *ptr++ = PACKET_TYPE_DATA;
+    char *buf = c->buf;
+    size_t buflen = sizeof(c->buf);
+    packet_header_t hdr = {.type = PACKET_TYPE_DATA};
 
-    int res = callback_write_record(src, srclen, &c->crypto, &c->params, c->enc, ptr, tail - ptr, &message);
+    char *tail = buf + buflen;
+    char *ptr = buf + packet_header_write(buf, buflen, &hdr);
+
+    int res = callback_write_record(src, srclen, &c->params, c->enc, ptr, tail - ptr, &message);
     if (res < 0) {
         log_error("%s Failed to write data packet: %s", c->addr, message);
         return AUDIO_STREAM_ABORT;
     }
-    ptr += res;
+    ptr = buf + ioutil_encrypt(&c->crypto, buf, buflen, buf, ptr + res - buf);
 
-    if (sendto(sock, c->buf, ptr - c->buf, 0, c->sa, c->socklen) < 0) {
+    if (sendto(sock, buf, ptr - buf, 0, c->sa, c->socklen) < 0) {
         log_error("%s Failed to send audio frame: %s", c->addr, socket_strerror());
         return AUDIO_STREAM_ABORT;
     }
@@ -153,10 +157,10 @@ static client_t *client_new(const uint8_t *iptr,
         goto fail;
     }
 
-    int err;
-    ptr += crypto_key_exchange(cc, ptr, keylen, &err, message);
-    if (err)
+    int res = crypto_key_exchange(cc, ptr, keylen, message);
+    if (res < 0)
         goto fail;
+    ptr += res;
 
     audio_stream_params_t params = DEFAULT_AUDIO_STREAM_PARAMS(APPLICATION_NAME);
     if (c->flags & STREAMCFG_FLAG_SAMPLE_F32) {
@@ -280,17 +284,33 @@ static void remove_client(client_t *c) {
     client_free(c);
 }
 
-static void send_heartbeat(client_t *c) {
-    packet_server_header_t hdr = {.type = PACKET_TYPE_HEARTBEAT};
-    uint32_t timer = htonl(time(NULL));
-
-    size_t buflen = sizeof(tx_buf);
+static int send_packet(client_t *c, uint8_t type, const void *src, size_t srclen, const char **message) {
     char *buf = tx_buf;
-    char *ptr = buf + packet_server_header_write(buf, buflen, &hdr);
-    ptr += memwrite(ptr, &timer, sizeof(timer));
+    size_t buflen = sizeof(tx_buf);
 
-    if (sendto(sock, buf, ptr - buf, 0, c->sa, c->socklen) < 0)
-        log_error("%s Failed to send heartbeat packet: %s", c->addr, socket_strerror());
+    packet_header_t hdr = {.type = type};
+    char *tail = buf + buflen;
+    char *ptr = buf + packet_header_write(buf, buflen, &hdr);
+
+    if (src && srclen > 0) {
+        assert(tail - ptr >= srclen);
+        memcpy(ptr, src, srclen);
+        ptr += srclen;
+    }
+    ptr = buf + ioutil_encrypt(&c->crypto, buf, buflen, buf, ptr - buf);
+
+    if (sendto(sock, buf, ptr - buf, 0, c->sa, c->socklen) < 0) {
+        *message = socket_strerror();
+        return -1;
+    }
+    return 0;
+}
+
+static void send_heartbeat(client_t *c) {
+    const char *message;
+    uint32_t timer = htonl(time(NULL));
+    if (send_packet(c, PACKET_TYPE_HEARTBEAT, &timer, sizeof(timer), &message) < 0)
+        log_error("%s Failed to send heartbeat packet: %s", c->addr, message);
 }
 
 static int send_handshake(client_t *c, const char **message) {
@@ -336,11 +356,13 @@ fail:
         remove_client(client);
 }
 
-static void handle_data(client_t *c, char *buf, size_t srclen, size_t buflen) {
+static void handle_data(client_t *c, char *src, size_t srclen) {
     const char *message;
-    int res = callback_read_ringbuf(buf, srclen, buflen, &c->crypto, &c->params, c->dec, c->rb, &message);
-    if (res < 0)
+    int res = callback_read_ringbuf(src, srclen, &c->params, c->dec, c->rb, &message);
+    if (res < 0) {
         log_error("%s Handling data packet error: %s", c->addr, message);
+        return;
+    }
 }
 
 static void handle_client_removal() {
@@ -414,9 +436,8 @@ int main() {
     signal(SIGINT, on_signal);
     socket_set_timeout(sock, 1, &message);
 
-    size_t buflen = sizeof(rx_buf);
-    char *buf = rx_buf;
-    packet_client_header_t hdr;
+    char buf[SOCKET_BUFSIZE];
+    size_t buflen = sizeof(buf);
     while (running) {
         socklen = sizeof(sin6);
         int res = recvfrom(sock, buf, buflen, 0, sa, &socklen);
@@ -430,28 +451,41 @@ int main() {
         if (res <= 0)
             continue;
 
-        char *ptr = buf + packet_handshake_check(buf, res);
         char *tail = buf + res;
+        char *ptr = buf + packet_handshake_check(buf, res);
         if (ptr != buf) { /* Pointer sliding, this is a handshake packet */
             handle_handshake(sa, socklen, ptr, tail - ptr);
             continue;
         }
 
-        ptr += packet_client_header_read(buf, res, &hdr);
+        packet_client_header_t chdr;
+        ptr += packet_client_header_read(buf, res, &chdr);
         if (ptr == buf) /* Pointer not sliding indicates failed header read */
             continue;
 
-        client_t *client = clients[hdr.idx];
-        if (!client)
+        client_t *c = clients[chdr.idx];
+        if (!c)
             continue;
-        time(&client->timer);
+        time(&c->timer);
+
+        /* Support for client roaming */
+        if (memcmp(c->sa, sa, socklen) != 0)
+            memcpy(c->sa, sa, socklen);
+
+        size_t msglen = buf + buflen - ptr;
+        if (ioutil_decrypt(&c->crypto, ptr, tail - ptr, ptr, &msglen, &message) <= 0)
+            continue;
+        tail = ptr + msglen;
+
+        packet_header_t hdr;
+        ptr += packet_header_read(ptr, tail - ptr, &hdr);
 
         switch (hdr.type) {
         case PACKET_TYPE_DATA:
-            handle_data(client, ptr, tail - ptr, buflen);
+            handle_data(c, ptr, tail - ptr);
             break;
         case PACKET_TYPE_CLOSE:
-            remove_client(client);
+            remove_client(c);
             break;
         }
     }

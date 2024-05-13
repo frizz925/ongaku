@@ -9,9 +9,8 @@
 #include <arpa/inet.h>
 #endif
 
-static size_t plaintext_key_exchange(void *handle, const char *key, size_t keylen, int *err, const char **message) {
+static int plaintext_key_exchange(void *handle, const char *key, size_t keylen, const char **message) {
     SET_MESSAGE(message, NULL);
-    *err = 0;
     return 0;
 }
 
@@ -22,18 +21,15 @@ static size_t plaintext_encrypt(void *handle, const char *src, size_t srclen, ch
     return srclen;
 }
 
-static size_t plaintext_decrypt(void *handle,
-                                const char *src,
-                                size_t srclen,
-                                char *dst,
-                                size_t *dstlen,
-                                int *err,
-                                const char **message) {
-    *err = 0;
+static int plaintext_decrypt(void *handle,
+                             const char *src,
+                             size_t srclen,
+                             char *dst,
+                             size_t *dstlen,
+                             const char **message) {
     if (srclen > *dstlen) {
         SET_MESSAGE(message, "Destination buffer too small");
-        *err = -1;
-        return 0;
+        return -1;
     }
     if (src != dst)
         memcpy(dst, src, srclen);

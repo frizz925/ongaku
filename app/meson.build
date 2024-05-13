@@ -1,15 +1,16 @@
-app_src = ['src/callbacks.c']
+app_src = ['src/callbacks.c', 'src/ioutil.c']
 app_deps = [opus]
 if host_machine.system() == 'windows'
     app_deps += ws2_32
 endif
 app_libs = [core, crypto, audio]
+app_include = include_directories('include')
 app_includes = [
     util_include,
     core_include,
     crypto_include,
     audio_include,
-    include_directories('include'),
+    app_include,
 ]
 
 executable(
@@ -29,3 +30,5 @@ executable(
     include_directories: app_includes,
     install: true,
 )
+
+subdir('tests')

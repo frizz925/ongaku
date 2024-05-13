@@ -4,11 +4,6 @@
 #include <assert.h>
 #include <sodium.h>
 
-#ifdef _WIN32
-#else
-#include <arpa/inet.h>
-#endif
-
 #define NONCE_WINDOW_SIZE 65536
 
 typedef struct {
@@ -50,24 +45,19 @@ static const char *sodiumfn_pubkey(void *handle, size_t *len) {
     return (char *)s->pk;
 }
 
-static size_t sodiumfn_key_exchange(void *handle, const char *key, size_t keylen, int *err, const char **message) {
-    *err = 0;
+static int sodiumfn_key_exchange(void *handle, const char *key, size_t keylen, const char **message) {
     if (keylen != sodiumfn_pubkey_size(handle)) {
         SET_MESSAGE(message, "Invalid public key size");
-        goto fail;
+        return -1;
     }
     sodium_t *s = handle;
     int res = s->server ? crypto_kx_server_session_keys(s->rx, s->tx, s->pk, s->sk, (unsigned char *)key)
                         : crypto_kx_client_session_keys(s->rx, s->tx, s->pk, s->sk, (unsigned char *)key);
     if (res) {
         SET_MESSAGE(message, "Key exchange failed");
-        goto fail;
+        return -1;
     }
     return keylen;
-
-fail:
-    *err = -1;
-    return 0;
 }
 
 static size_t sodiumfn_encrypt(void *handle, const char *src, size_t srclen, char *dst, size_t dstlen) {
@@ -91,21 +81,19 @@ static size_t sodiumfn_encrypt(void *handle, const char *src, size_t srclen, cha
     return len;
 }
 
-static size_t sodiumfn_decrypt(void *handle,
-                               const char *src,
-                               size_t srclen,
-                               char *dst,
-                               size_t *dstlen,
-                               int *err,
-                               const char **message) {
-    *err = 0;
+static int sodiumfn_decrypt(void *handle,
+                            const char *src,
+                            size_t srclen,
+                            char *dst,
+                            size_t *dstlen,
+                            const char **message) {
     sodium_t *s = handle;
     size_t nlen = sizeof(s->rx_nonce);
     size_t msglen = srclen - nlen;
     size_t datalen = msglen - crypto_secretbox_MACBYTES;
     if (srclen < nlen) {
         SET_MESSAGE(message, "Source buffer too small for nonce");
-        goto fail;
+        return -1;
     }
     assert(*dstlen >= datalen);
 
@@ -115,21 +103,17 @@ static size_t sodiumfn_decrypt(void *handle,
     int cmp = nonce_compare(nonce, s->rx_nonce);
     if (cmp <= 0 && abs(cmp) < NONCE_WINDOW_SIZE) {
         SET_MESSAGE(message, "Invalid nonce value");
-        goto fail;
+        return -1;
     }
     memcpy(s->rx_nonce, nonce, nlen);
 
     if (crypto_secretbox_open_easy((unsigned char *)dst, msg, msglen, s->rx_nonce, s->rx) != 0) {
         SET_MESSAGE(message, "Failed to decrypt message");
-        goto fail;
+        return -1;
     }
 
     *dstlen = datalen;
     return srclen;
-
-fail:
-    *err = -1;
-    return 0;
 }
 
 static void sodiumfn_deinit(void *handle) {
