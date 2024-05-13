@@ -3,7 +3,6 @@
 #include "util.h"
 
 #include <assert.h>
-#include <stdio.h>
 
 int callback_write_record(const void *src,
                           size_t srclen,
@@ -40,8 +39,9 @@ int callback_write_record(const void *src,
 int callback_read_playback(void *dst, size_t *dstlen, ringbuf_t *rb, const char **message) {
     size_t buflen = *dstlen;
     size_t size = ringbuf_size(rb);
+    size_t frames = ringbuf_remaining(rb);
     size_t req_frames = buflen / size;
-    if (ringbuf_remaining(rb) < req_frames) {
+    if (frames < req_frames) {
         memset(dst, 0, buflen);
         return buflen;
     }
@@ -83,7 +83,6 @@ int callback_read_ringbuf(const void *src,
     size_t frames_out = ringbuf_writeptr(rb, &buf, frames_in);
     if (frames_out < frames_in) {
         SET_MESSAGE(message, "Ring buffer overflow!");
-        fprintf(stderr, "frames_in=%d frames_out=%zu\n", frames_in, frames_out);
         return -1;
     }
 
