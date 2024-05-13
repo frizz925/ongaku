@@ -49,8 +49,7 @@ struct audio_stream {
     atomic_int lock_count;
 
     pa_sample_spec sample_spec;
-    pa_buffer_attr in_buffer_attr;
-    pa_buffer_attr out_buffer_attr;
+    pa_buffer_attr buffer_attr;
 
     pa_context *pa_context;
 
@@ -199,8 +198,8 @@ static int context_start(stream_context_t *ctx, const char **message) {
         return 0;
     int err =
         ctx->direction == STREAM_DIRECTION_IN
-            ? pa_stream_connect_record(ctx->pa_stream, NULL, &ctx->stream->in_buffer_attr, stream_flags)
-            : pa_stream_connect_playback(ctx->pa_stream, NULL, &ctx->stream->out_buffer_attr, stream_flags, NULL, NULL);
+            ? pa_stream_connect_record(ctx->pa_stream, NULL, &ctx->stream->buffer_attr, stream_flags)
+            : pa_stream_connect_playback(ctx->pa_stream, NULL, &ctx->stream->buffer_attr, stream_flags, NULL, NULL);
     if (err) {
         SET_MESSAGE(message, pa_strerror(err));
         return -1;
@@ -273,15 +272,10 @@ void audio_stream_init(audio_stream_t *stream, const audio_stream_params_t *para
     stream->sample_spec.channels = params->channels;
     stream->sample_spec.rate = params->sample_rate;
 
-    size_t in_bufsize = audio_stream_frame_bufsize(params, params->in_frame_duration);
-    stream->in_buffer_attr.maxlength = in_bufsize;
-    stream->in_buffer_attr.tlength = in_bufsize;
-    stream->in_buffer_attr.prebuf = sizeof(uint32_t) - 1;
-
-    size_t out_bufsize = audio_stream_frame_bufsize(params, params->out_frame_duration);
-    stream->out_buffer_attr.maxlength = out_bufsize;
-    stream->out_buffer_attr.tlength = out_bufsize;
-    stream->out_buffer_attr.prebuf = sizeof(uint32_t) - 1;
+    size_t bufsize = audio_stream_frame_bufsize(params, params->frame_duration);
+    stream->buffer_attr.maxlength = bufsize;
+    stream->buffer_attr.tlength = bufsize;
+    stream->buffer_attr.prebuf = sizeof(uint32_t) - 1;
 
     pa_mainloop_api *api = pa_threaded_mainloop_get_api(mainloop);
     stream->pa_context = pa_context_new(api, params->application_name);

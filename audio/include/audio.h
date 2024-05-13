@@ -5,9 +5,8 @@
 
 #define CHANNELS 2
 #define SAMPLE_RATE 48000
-#define FRAME_PACKET_DURATION 0.005
-#define FRAME_STREAM_DURATION 0.02
-#define FRAME_BUFFER_DURATION (4 * FRAME_STREAM_DURATION)
+#define FRAME_PACKET_DURATION 0.01
+#define FRAME_BUFFER_DURATION 0.25
 
 #define SAMPLE_FORMAT short
 #define SAMPLE_SIZE sizeof(SAMPLE_FORMAT)
@@ -25,8 +24,7 @@ typedef struct {
     double sample_rate;
     size_t sample_size;
     audio_format_t sample_format;
-    double in_frame_duration;
-    double out_frame_duration;
+    double frame_duration;
 } audio_stream_params_t;
 
 #define DEFAULT_AUDIO_STREAM_PARAMS(name) \
@@ -36,8 +34,7 @@ typedef struct {
         .sample_rate = SAMPLE_RATE, \
         .sample_size = SAMPLE_SIZE, \
         .sample_format = AUDIO_FORMAT_S16, \
-        .in_frame_duration = FRAME_PACKET_DURATION, \
-        .out_frame_duration = FRAME_STREAM_DURATION, \
+        .frame_duration = FRAME_PACKET_DURATION, \
     };
 
 typedef struct audio_stream audio_stream_t;

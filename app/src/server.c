@@ -20,14 +20,6 @@
 #include <stdbool.h>
 #include <time.h>
 
-#define APPLICATION_NAME "Ongaku"
-
-#define MAX_CLIENTS 64
-#define SOCKET_BUFSIZE 32768
-#define STREAM_NAME_MAXLEN 128
-#define STREAM_TIMEOUT_SECONDS 30
-#define HEARTBEAT_INTERVAL_SECONDS 10
-
 static pool_t pool;
 static socket_t sock = SOCKET_UNDEFINED;
 static atomic_bool running = true;
@@ -64,6 +56,55 @@ typedef struct {
 
 static client_t *clients[MAX_CLIENTS] = {0};
 
+static int send_packet(client_t *c, uint8_t type, const void *src, size_t srclen, const char **message) {
+    char *buf = tx_buf;
+    size_t buflen = sizeof(tx_buf);
+
+    packet_header_t hdr = {.type = type};
+    char *tail = buf + buflen;
+    char *ptr = buf + packet_header_write(buf, buflen, &hdr);
+
+    if (src && srclen > 0) {
+        assert(tail - ptr >= srclen);
+        memcpy(ptr, src, srclen);
+        ptr += srclen;
+    }
+    ptr = buf + ioutil_encrypt(&c->crypto, buf, buflen, buf, ptr - buf);
+
+    if (sendto(sock, buf, ptr - buf, 0, c->sa, c->socklen) < 0) {
+        *message = socket_strerror();
+        return -1;
+    }
+    return 0;
+}
+
+static int send_handshake(client_t *c, const char **message) {
+    size_t buflen = sizeof(tx_buf);
+    char *buf = tx_buf;
+    char *ptr = buf + packet_handshake_write(buf, buflen);
+    char *tail = buf + buflen;
+    *ptr++ = c->idx;
+
+    size_t keylen;
+    const char *key = crypto_pubkey(&c->crypto, &keylen);
+    ptr += packet_write(ptr, tail - ptr, key, keylen);
+
+    if (sendto(sock, buf, ptr - buf, 0, c->sa, c->socklen) < 0) {
+        SET_MESSAGE(message, socket_strerror());
+        return -1;
+    }
+
+    log_info("%s Handshake success. Client index: %d", c->addr, c->idx);
+    return 0;
+}
+
+static void send_heartbeat(client_t *c) {
+    const char *message;
+    uint32_t timer = htonl(time(NULL));
+    if (send_packet(c, PACKET_TYPE_HEARTBEAT, &timer, sizeof(timer), &message) < 0)
+        log_error("%s Failed to send heartbeat packet: %s", c->addr, message);
+}
+
 static audio_callback_result_t on_record(const void *src, size_t srclen, void *userdata) {
     const char *message;
     client_t *c = userdata;
@@ -74,22 +115,22 @@ static audio_callback_result_t on_record(const void *src, size_t srclen, void *u
 
     char *buf = c->buf;
     size_t buflen = sizeof(c->buf);
-    packet_header_t hdr = {.type = PACKET_TYPE_DATA};
-
-    char *tail = buf + buflen;
-    char *ptr = buf + packet_header_write(buf, buflen, &hdr);
-
-    int res = callback_write_record(src, srclen, &c->params, c->enc, ptr, tail - ptr, &message);
-    if (res < 0) {
-        log_error("%s Failed to write data packet: %s", c->addr, message);
-        return AUDIO_STREAM_ABORT;
+    size_t off = 0;
+    while (off < srclen) {
+        size_t left = srclen - off;
+        size_t size = MIN(left, FRAGMENT_SIZE);
+        int res = callback_write_record(src + off, size, &c->params, c->enc, buf, buflen, &message);
+        if (res < 0) {
+            log_error("%s Failed to write data packet: %s", c->addr, message);
+            return AUDIO_STREAM_ABORT;
+        }
+        if (send_packet(c, PACKET_TYPE_DATA, buf, res, &message) < 0) {
+            log_error("%s Failed to send audio frame: %s", c->addr, message);
+            return AUDIO_STREAM_ABORT;
+        }
+        off += size;
     }
-    ptr = buf + ioutil_encrypt(&c->crypto, buf, buflen, buf, ptr + res - buf);
 
-    if (sendto(sock, buf, ptr - buf, 0, c->sa, c->socklen) < 0) {
-        log_error("%s Failed to send audio frame: %s", c->addr, socket_strerror());
-        return AUDIO_STREAM_ABORT;
-    }
     return AUDIO_STREAM_CONTINUE;
 }
 
@@ -186,7 +227,7 @@ static client_t *client_new(const uint8_t *iptr,
             SET_MESSAGE(message, opus_strerror(err));
             goto fail;
         }
-        params.in_frame_duration = FRAME_OPUS_DURATION;
+        params.frame_duration = FRAME_OPUS_DURATION;
     }
 
     c->sa = malloc_copy(sa, socklen);
@@ -285,55 +326,6 @@ static void remove_client(client_t *c) {
 
     pool_put(&pool, (void *)c->iptr);
     client_free(c);
-}
-
-static int send_packet(client_t *c, uint8_t type, const void *src, size_t srclen, const char **message) {
-    char *buf = tx_buf;
-    size_t buflen = sizeof(tx_buf);
-
-    packet_header_t hdr = {.type = type};
-    char *tail = buf + buflen;
-    char *ptr = buf + packet_header_write(buf, buflen, &hdr);
-
-    if (src && srclen > 0) {
-        assert(tail - ptr >= srclen);
-        memcpy(ptr, src, srclen);
-        ptr += srclen;
-    }
-    ptr = buf + ioutil_encrypt(&c->crypto, buf, buflen, buf, ptr - buf);
-
-    if (sendto(sock, buf, ptr - buf, 0, c->sa, c->socklen) < 0) {
-        *message = socket_strerror();
-        return -1;
-    }
-    return 0;
-}
-
-static void send_heartbeat(client_t *c) {
-    const char *message;
-    uint32_t timer = htonl(time(NULL));
-    if (send_packet(c, PACKET_TYPE_HEARTBEAT, &timer, sizeof(timer), &message) < 0)
-        log_error("%s Failed to send heartbeat packet: %s", c->addr, message);
-}
-
-static int send_handshake(client_t *c, const char **message) {
-    size_t buflen = sizeof(tx_buf);
-    char *buf = tx_buf;
-    char *ptr = buf + packet_handshake_write(buf, buflen);
-    char *tail = buf + buflen;
-    *ptr++ = c->idx;
-
-    size_t keylen;
-    const char *key = crypto_pubkey(&c->crypto, &keylen);
-    ptr += packet_write(ptr, tail - ptr, key, keylen);
-
-    if (sendto(sock, buf, ptr - buf, 0, c->sa, c->socklen) < 0) {
-        SET_MESSAGE(message, socket_strerror());
-        return -1;
-    }
-
-    log_info("%s Handshake success. Client index: %d", c->addr, c->idx);
-    return 0;
 }
 
 static void handle_handshake(const struct sockaddr *sa, socklen_t socklen, const char *src, size_t srclen) {

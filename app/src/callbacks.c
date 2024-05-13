@@ -40,14 +40,13 @@ int callback_write_record(const void *src,
 int callback_read_playback(void *dst, size_t *dstlen, ringbuf_t *rb, const char **message) {
     size_t buflen = *dstlen;
     size_t size = ringbuf_size(rb);
-    size_t frames = buflen / size;
-    if (ringbuf_remaining(rb) < frames) {
-        SET_MESSAGE(message, "Ring buffer underflow!");
-        memset(dst, 0, frames * size);
-        return 1;
+    size_t req_frames = buflen / size;
+    if (ringbuf_remaining(rb) < req_frames) {
+        memset(dst, 0, buflen);
+        return buflen;
     }
-    size_t len = ringbuf_read(rb, dst, frames);
-    *dstlen = len * size;
+    size_t len = ringbuf_read(rb, dst, req_frames) * size;
+    *dstlen = len;
     return len;
 }
 

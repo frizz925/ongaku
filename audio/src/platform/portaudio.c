@@ -4,6 +4,7 @@
 #include <portaudio.h>
 
 #include <assert.h>
+#include <stdbool.h>
 #include <stdio.h>
 
 static PaHostApiIndex host_api = paHostApiNotFound;
@@ -38,8 +39,7 @@ typedef struct {
 struct audio_stream {
     bool connected;
     audio_stream_params_t params;
-    size_t in_frame_count;
-    size_t out_frame_count;
+    size_t frame_count;
     playback_context_t playback;
     record_context_t record;
 };
@@ -144,7 +144,7 @@ static int context_init(stream_context_t *ctx,
                                 direction == DIRECTION_IN ? &ctx->pa_params : NULL,
                                 direction == DIRECTION_OUT ? &ctx->pa_params : NULL,
                                 params->sample_rate,
-                                direction == DIRECTION_IN ? stream->in_frame_count : stream->out_frame_count,
+                                stream->frame_count,
                                 0,
                                 direction == DIRECTION_IN ? on_stream_input : on_stream_output,
                                 ctx);
@@ -232,8 +232,7 @@ void audio_stream_init(audio_stream_t *stream, const audio_stream_params_t *para
     memset(stream, 0, audio_stream_sizeof());
     stream->connected = false;
     stream->params = *params;
-    stream->in_frame_count = audio_stream_frame_count(params, params->in_frame_duration);
-    stream->out_frame_count = audio_stream_frame_count(params, params->out_frame_duration);
+    stream->frame_count = audio_stream_frame_count(params, params->frame_duration);
     stream_context_reset((stream_context_t *)&stream->playback, stream);
     stream_context_reset((stream_context_t *)&stream->record, stream);
 }
@@ -331,8 +330,7 @@ int audio_stream_disconnect(audio_stream_t *stream, const char **message) {
 void audio_stream_deinit(audio_stream_t *stream) {
     audio_stream_params_t empty_params = {0};
     stream->params = empty_params;
-    stream->in_frame_count = 0;
-    stream->out_frame_count = 0;
+    stream->frame_count = 0;
 }
 
 void audio_stream_free(audio_stream_t *stream) {

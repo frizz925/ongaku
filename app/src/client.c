@@ -23,12 +23,6 @@
 #include <time.h>
 #include <unistd.h>
 
-#define APPLICATION_NAME "Ongaku"
-#define SOCKET_BUFSIZE 32768
-#define STREAM_TIMEOUT_SECONDS 30
-#define HEARTBEAT_INTERVAL_SECONDS 10
-#define HANDSHAKE_RETRY 5
-
 typedef struct {
     uint8_t idx;
     time_t timer;
@@ -91,20 +85,28 @@ static audio_callback_result_t on_record(const void *src, size_t srclen, void *u
     const char *message;
     context_t *ctx = userdata;
     if (time(NULL) - ctx->timer > STREAM_TIMEOUT_SECONDS) {
+        log_info("Server timeout");
         return AUDIO_STREAM_COMPLETE;
     }
 
     char *buf = ctx->buf;
     size_t buflen = sizeof(ctx->buf);
-    int res = callback_write_record(src, srclen, ctx->params, ctx->enc, buf, buflen, &message);
-    if (res < 0) {
-        log_error("Failed to write data packet: %s", message);
-        return AUDIO_STREAM_ABORT;
+    size_t off = 0;
+    while (off < srclen) {
+        size_t left = srclen - off;
+        size_t size = MIN(left, FRAGMENT_SIZE);
+        int res = callback_write_record(src + off, size, ctx->params, ctx->enc, buf, buflen, &message);
+        if (res < 0) {
+            log_error("Failed to write data packet: %s", message);
+            return AUDIO_STREAM_ABORT;
+        }
+        if (send_packet(ctx, PACKET_TYPE_DATA, buf, res, &message) < 0) {
+            log_error("Failed to send audio frame: %s", message);
+            return AUDIO_STREAM_ABORT;
+        }
+        off += size;
     }
-    if (send_packet(ctx, PACKET_TYPE_DATA, buf, res, &message) < 0) {
-        log_error("Failed to send audio frame: %s", message);
-        return AUDIO_STREAM_ABORT;
-    }
+
     return AUDIO_STREAM_CONTINUE;
 }
 
@@ -428,7 +430,7 @@ int main(int argc, char *argv[]) {
     }
 
     if (flags & STREAMCFG_FLAG_CODEC_OPUS)
-        params.in_frame_duration = FRAME_OPUS_DURATION;
+        params.frame_duration = FRAME_OPUS_DURATION;
 
     struct sockaddr_in6 sin6;
     struct sockaddr *sa = (struct sockaddr *)&sin6;
