@@ -1,7 +1,5 @@
 #include "audio.h"
 
-#include <stdlib.h>
-
 size_t audio_stream_frame_size(const audio_stream_params_t *params) {
     return params->channels * params->sample_size;
 }
