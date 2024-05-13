@@ -5,6 +5,7 @@
 #define SOCKET_ERROR SOCKET_UNDEFINED
 
 #if _WIN32
+
 #include <winsock2.h>
 
 #include <io.h>

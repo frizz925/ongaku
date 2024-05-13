@@ -1,4 +1,8 @@
+#ifdef __APPLE__
+#define _DARWIN_C_SOURCE
+#else
 #define _POSIX_C_SOURCE 200112L
+#endif
 
 #include "socket.h"
 #include "util.h"
