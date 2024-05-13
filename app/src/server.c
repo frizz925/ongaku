@@ -359,10 +359,10 @@ fail:
 static void handle_data(client_t *c, char *src, size_t srclen) {
     const char *message;
     int res = callback_read_ringbuf(src, srclen, &c->params, c->dec, c->rb, &message);
-    if (res < 0) {
+    if (res < -1)
         log_error("%s Handling data packet error: %s", c->addr, message);
-        return;
-    }
+    else if (res < 0)
+        log_warn("%s Handling data packet warning: %s", c->addr, message);
 }
 
 static void handle_client_removal() {

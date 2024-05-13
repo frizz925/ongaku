@@ -127,8 +127,10 @@ static void on_finished(void *userdata) {
 static void handle_data(context_t *ctx, char *src, size_t srclen) {
     const char *message;
     int res = callback_read_ringbuf(src, srclen, ctx->params, ctx->dec, ctx->rb, &message);
-    if (res < 0)
+    if (res < -1)
         log_error("Handling data packet error: %s", message);
+    else if (res < 0)
+        log_warn("Handling data packet warning: %s", message);
 }
 
 static int application_loop(int flags,

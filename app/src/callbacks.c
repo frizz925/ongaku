@@ -62,7 +62,7 @@ int callback_read_ringbuf(const void *src,
     const char *ptr = src + packet_audio_header_read(src, srclen, &frames_in);
     if (frames_in <= 0) {
         SET_MESSAGE(message, "Invalid data header");
-        return -1;
+        return -2;
     }
     size_t len = tail - ptr;
 
@@ -70,7 +70,7 @@ int callback_read_ringbuf(const void *src,
     if (!dec) {
         if (frames_in * audio_stream_frame_size(params) > len) {
             SET_MESSAGE(message, "Invalid frame count");
-            return -1;
+            return -2;
         }
         if (ringbuf_available(rb) < frames_in) {
             SET_MESSAGE(message, "Ring buffer overflow!");
