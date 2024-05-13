@@ -9,7 +9,7 @@
 #include <string.h>
 
 #define SAMPLE_MESSAGE "This is a plaintext message"
-#define MESSAGING_LOOP 300
+#define MESSAGING_LOOP 65536
 
 static void test_suite(crypto_t *c, crypto_t *s) {
     int err;

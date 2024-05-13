@@ -9,6 +9,8 @@
 #include <arpa/inet.h>
 #endif
 
+#define NONCE_WINDOW_SIZE 65536
+
 typedef struct {
     unsigned char pk[crypto_kx_PUBLICKEYBYTES];
     unsigned char sk[crypto_kx_PUBLICKEYBYTES];
@@ -24,7 +26,8 @@ static void nonce_increment(unsigned char *nonce) {
         if (nonce[i] < 255) {
             nonce[i]++;
             break;
-        }
+        } else
+            nonce[i] = 0;
     }
 }
 
@@ -108,7 +111,9 @@ static size_t sodiumfn_decrypt(void *handle,
 
     const unsigned char *nonce = (unsigned char *)src;
     const unsigned char *msg = nonce + nlen;
-    if (nonce_compare(nonce, s->rx_nonce) <= 0) {
+
+    int cmp = nonce_compare(nonce, s->rx_nonce);
+    if (cmp <= 0 && abs(cmp) < NONCE_WINDOW_SIZE) {
         SET_MESSAGE(message, "Invalid nonce value");
         goto fail;
     }
