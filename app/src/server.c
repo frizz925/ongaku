@@ -184,7 +184,9 @@ static client_t *client_new(const uint8_t *iptr,
             SET_MESSAGE(message, opus_strerror(err));
             goto fail;
         }
-    }
+        params.frame_duration = FRAME_OPUS_DURATION;
+    } else
+        params.frame_duration = FRAME_RAW_DURATION;
 
     c->sa = malloc_copy(sa, socklen);
     c->stream = audio_stream_new(&c->params);
