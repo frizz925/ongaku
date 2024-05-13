@@ -1,6 +1,7 @@
 #define _POSIX_C_SOURCE 200809L
 
 #include "callbacks.h"
+#include "consts.h"
 #include "crypto/crypto.h"
 #include "crypto/plaintext.h"
 #include "crypto/sodium.h"
@@ -185,9 +186,8 @@ static client_t *client_new(const uint8_t *iptr,
             SET_MESSAGE(message, opus_strerror(err));
             goto fail;
         }
-        params.frame_duration = FRAME_OPUS_DURATION;
-    } else
-        params.frame_duration = FRAME_RAW_DURATION;
+        params.in_frame_duration = FRAME_OPUS_DURATION;
+    }
 
     c->sa = malloc_copy(sa, socklen);
     c->stream = audio_stream_new(&c->params);

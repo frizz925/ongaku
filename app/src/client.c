@@ -1,6 +1,7 @@
 #define _POSIX_C_SOURCE 200809L
 
 #include "callbacks.h"
+#include "consts.h"
 #include "crypto/crypto.h"
 #include "crypto/plaintext.h"
 #include "crypto/sodium.h"
@@ -427,7 +428,10 @@ int main(int argc, char *argv[]) {
         params.sample_size = sizeof(opus_int16);
         params.sample_format = AUDIO_FORMAT_S16;
     }
-    params.frame_duration = (flags & STREAMCFG_FLAG_CODEC_OPUS) ? FRAME_OPUS_DURATION : FRAME_RAW_DURATION;
+
+    if (flags & STREAMCFG_FLAG_CODEC_OPUS) {
+        params.in_frame_duration = FRAME_OPUS_DURATION;
+    }
 
     struct sockaddr_in6 sin6;
     struct sockaddr *sa = (struct sockaddr *)&sin6;

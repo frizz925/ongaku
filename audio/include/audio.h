@@ -1,17 +1,15 @@
 #ifndef _AUDIO_H
 #define _AUDIO_H
 
-#include <opus/opus.h>
-
 #include <stddef.h>
 
 #define CHANNELS 2
 #define SAMPLE_RATE 48000
-#define FRAME_RAW_DURATION 0.005
-#define FRAME_OPUS_DURATION 0.02
-#define FRAME_BUFFER_DURATION (4 * FRAME_OPUS_DURATION)
+#define FRAME_PACKET_DURATION 0.005
+#define FRAME_STREAM_DURATION 0.02
+#define FRAME_BUFFER_DURATION (4 * FRAME_STREAM_DURATION)
 
-#define SAMPLE_FORMAT opus_int16
+#define SAMPLE_FORMAT short
 #define SAMPLE_SIZE sizeof(SAMPLE_FORMAT)
 
 #define OPUS_APPLICATION OPUS_APPLICATION_RESTRICTED_LOWDELAY
@@ -27,7 +25,8 @@ typedef struct {
     double sample_rate;
     size_t sample_size;
     audio_format_t sample_format;
-    double frame_duration;
+    double in_frame_duration;
+    double out_frame_duration;
 } audio_stream_params_t;
 
 #define DEFAULT_AUDIO_STREAM_PARAMS(name) \
@@ -37,7 +36,8 @@ typedef struct {
         .sample_rate = SAMPLE_RATE, \
         .sample_size = SAMPLE_SIZE, \
         .sample_format = AUDIO_FORMAT_S16, \
-        .frame_duration = FRAME_OPUS_DURATION, \
+        .in_frame_duration = FRAME_PACKET_DURATION, \
+        .out_frame_duration = FRAME_STREAM_DURATION, \
     };
 
 typedef struct audio_stream audio_stream_t;
