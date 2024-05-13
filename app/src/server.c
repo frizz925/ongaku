@@ -373,11 +373,6 @@ static void handle_client_removal() {
 }
 
 static void handle_client_heartbeat() {
-    static time_t timer = 0;
-    if (timer == 0)
-        time(&timer);
-    if (time(NULL) - timer < HEARTBEAT_INTERVAL_SECONDS)
-        return;
     for (int i = 0; i < MAX_CLIENTS; i++) {
         client_t *c = clients[i];
         if (!c)
@@ -433,7 +428,14 @@ int main() {
 
     char buf[SOCKET_BUFSIZE];
     size_t buflen = sizeof(buf);
+    time_t timer = time(NULL);
     while (running) {
+        if (time(NULL) - timer >= HEARTBEAT_INTERVAL_SECONDS) {
+            handle_client_heartbeat();
+            time(&timer);
+        }
+        handle_client_removal();
+
         socklen = sizeof(sin6);
         int res = recvfrom(sock, buf, buflen, 0, sa, &socklen);
         if (res < 0 && !socket_error_timeout()) {
@@ -441,8 +443,6 @@ int main() {
             goto fail;
         }
 
-        handle_client_removal();
-        handle_client_heartbeat();
         if (res <= 0)
             continue;
 
