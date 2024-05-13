@@ -14,12 +14,9 @@
 #include <opus/opus.h>
 
 #include <assert.h>
-#include <bits/getopt_core.h>
 #include <signal.h>
 #include <stdatomic.h>
-#include <stdbool.h>
 #include <stdio.h>
-#include <stdlib.h>
 #include <stdnoreturn.h>
 #include <strings.h>
 #include <time.h>

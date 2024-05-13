@@ -4,11 +4,6 @@
 #include <assert.h>
 #include <string.h>
 
-#ifdef _WIN32
-#else
-#include <arpa/inet.h>
-#endif
-
 static int plaintext_key_exchange(void *handle, const char *key, size_t keylen, const char **message) {
     SET_MESSAGE(message, NULL);
     return 0;

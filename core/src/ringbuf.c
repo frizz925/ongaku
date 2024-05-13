@@ -3,7 +3,6 @@
 
 #include <assert.h>
 #include <stdatomic.h>
-#include <stdbool.h>
 
 #define MIN_BUFSIZE 4
 

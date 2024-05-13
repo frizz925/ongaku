@@ -2,8 +2,6 @@
 #include "util.h"
 
 #include <assert.h>
-#include <stdint.h>
-#include <string.h>
 
 #ifdef _WIN32
 #else

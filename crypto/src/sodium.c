@@ -21,8 +21,8 @@ static void nonce_increment(unsigned char *nonce) {
         if (nonce[i] < 255) {
             nonce[i]++;
             break;
-        } else
-            nonce[i] = 0;
+        }
+        nonce[i] = 0;
     }
 }
 

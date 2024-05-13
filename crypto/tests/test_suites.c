@@ -5,8 +5,6 @@
 #include <sodium.h>
 
 #include <assert.h>
-#include <stdlib.h>
-#include <string.h>
 
 #define SAMPLE_MESSAGE "This is a plaintext message"
 #define MESSAGING_LOOP 65536
