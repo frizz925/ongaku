@@ -378,7 +378,7 @@ int main(int argc, char *argv[]) {
     const char *indev = NULL;
     const char *outdev = NULL;
     uint16_t port = DEFAULT_PORT;
-    int flags = DEFAULT_STREAMCFG_FLAGS;
+    int flags = STREAMCFG_DEFAULT_FLAGS;
 
     int opt;
     while ((opt = getopt(argc, argv, "hp:d:i:o:fcs")) != -1) {
@@ -390,9 +390,11 @@ int main(int argc, char *argv[]) {
             break;
         case 'd':
             if (strncasecmp(optarg, "in", 2) == 0)
-                flags &= ~STREAMCFG_FLAG_OUTPUT;
+                flags |= STREAMCFG_FLAG_INPUT;
             else if (strncasecmp(optarg, "out", 3) == 0)
-                flags &= ~STREAMCFG_FLAG_INPUT;
+                flags |= STREAMCFG_FLAG_OUTPUT;
+            else
+                flags |= STREAMCFG_FLAG_DUPLEX;
             break;
         case 'i':
             indev = optarg;
@@ -413,7 +415,9 @@ int main(int argc, char *argv[]) {
             usage(EXIT_FAILURE);
         }
     }
+
     log_debug("flags=%d", flags);
+    assert(flags & STREAMCFG_DIRECTION_MASK);
 
     if (optind >= argc)
         usage(EXIT_FAILURE);

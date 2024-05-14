@@ -172,10 +172,14 @@ static client_t *client_new(const uint8_t *iptr,
                             const char **message) {
     assert(socklen >= sizeof(struct sockaddr));
 
-    packet_config_t cfg = {.flags = DEFAULT_STREAMCFG_FLAGS};
+    packet_config_t cfg = {.flags = STREAMCFG_DEFAULT_FLAGS};
     const char *ptr = buf + packet_config_read(buf, buflen, &cfg);
-    const char *tail = buf + buflen;
+
     log_debug("%s flags=%d", addr, cfg.flags);
+    if (!(cfg.flags & STREAMCFG_DIRECTION_MASK)) {
+        SET_MESSAGE(message, "Stream direction is not defined");
+        return NULL;
+    }
 
     client_t *c = malloc_zero(sizeof(client_t));
     c->idx = *iptr;
@@ -190,6 +194,7 @@ static client_t *client_new(const uint8_t *iptr,
         crypto_init_plaintext(cc);
 
     size_t keylen = crypto_pubkey_size(cc);
+    const char *tail = buf + buflen;
     if (tail - ptr < keylen) {
         *message = "Invalid public key size";
         goto fail;
@@ -449,10 +454,6 @@ int main() {
             continue;
         time(&c->timer);
 
-        /* Support for client roaming */
-        if (memcmp(c->sa, sa, socklen) != 0)
-            memcpy(c->sa, sa, socklen);
-
         size_t msglen = buf + buflen - ptr;
         if (ioutil_decrypt(&c->crypto, ptr, tail - ptr, ptr, &msglen, &message) <= 0)
             continue;
@@ -469,6 +470,10 @@ int main() {
             remove_client(c);
             break;
         }
+
+        /* Support for client roaming */
+        if (memcmp(c->sa, sa, socklen) != 0)
+            memcpy(c->sa, sa, socklen);
     }
     goto cleanup;
 
