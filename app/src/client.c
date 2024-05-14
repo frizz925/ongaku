@@ -448,6 +448,7 @@ int main(int argc, char *argv[]) {
     const char *addr = strsockaddr_r(sa, socklen, addrbuf, sizeof(addrbuf));
 
     signal(SIGINT, on_signal);
+    signal(SIGTERM, on_signal);
 
     ringbuf_t *rb =
         ringbuf_new(audio_stream_frame_count(&params, FRAME_BUFFER_DURATION), audio_stream_frame_size(&params));

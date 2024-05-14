@@ -414,6 +414,7 @@ int main() {
     log_info("Socket listening at %s", strsockaddr(sa, socklen));
 
     signal(SIGINT, on_signal);
+    signal(SIGTERM, on_signal);
     socket_set_timeout(sock, 1, &message);
 
     char buf[SOCKET_BUFSIZE];
@@ -463,6 +464,10 @@ int main() {
             continue;
         tail = ptr + msglen;
 
+        /* Support for client roaming */
+        if (memcmp(c->sa, sa, socklen) != 0)
+            memcpy(c->sa, sa, socklen);
+
         packet_header_t hdr;
         ptr += packet_header_read(ptr, tail - ptr, &hdr);
 
@@ -474,10 +479,6 @@ int main() {
             remove_client(c);
             break;
         }
-
-        /* Support for client roaming */
-        if (memcmp(c->sa, sa, socklen) != 0)
-            memcpy(c->sa, sa, socklen);
     }
     goto cleanup;
 
