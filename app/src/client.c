@@ -341,19 +341,20 @@ noreturn static void usage(int rc) {
     fprintf(stderr,
             "Usage: ongaku-client [-hpdiofcs] <server-addr>\n"
             "   -h              print this help\n"
-            "   -p port         use different port to connect to the server\n"
+            "   -p port         use different port to connect to the server (default: %d)\n"
             "   -d direction    specifiy direction of the stream: in, out, duplex (default: out)\n"
             "   -i device       use input device name\n"
             "   -o device       use output device name\n"
             "   -f              use 32-bit float sample format\n"
-            "   -c              disable Opus codec (see WARNING)\n"
-            "   -s              disable encryption (see DANGER)\n"
+            "   -c              disable Opus codec (see CAUTION)\n"
+            "   -s              disable encryption (see WARNING)\n"
             "\n"
-            "WARNING: Disabling Opus codec will result in slightly smaller delay and CPU load\n"
+            "CAUTION: Disabling Opus codec will result in slightly smaller delay and CPU load\n"
             "but significantly higher network bandwidth.\n"
             "\n"
-            "DANGER: Disabling encryption will make your connection susceptible to hijacking\n"
-            "or even eavesdropping. Make sure to only disable this in an isolated network.\n");
+            "WARNING: Disabling encryption will make your connection susceptible to hijacking\n"
+            "or even eavesdropping. Make sure to only disable this in an isolated network.\n",
+            DEFAULT_PORT);
     exit(rc);
 }
 
