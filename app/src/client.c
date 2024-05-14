@@ -354,7 +354,7 @@ noreturn static void usage(int rc) {
             "\n"
             "DANGER: Disabling encryption will make your connection susceptible to hijacking\n"
             "or even eavesdropping. Make sure to only disable this in an isolated network.\n");
-    exit(EXIT_FAILURE);
+    exit(rc);
 }
 
 int main(int argc, char *argv[]) {
