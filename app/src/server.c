@@ -319,9 +319,8 @@ static void remove_client(client_t *c) {
     clients[c->idx] = NULL;
     log_debug("%s Client removed, index: %d", c->addr, c->idx);
 
-    uint8_t flag = PACKET_TYPE_CLOSE;
-    if (sendto(sock, (char *)&flag, sizeof(flag), 0, c->sa, c->socklen) < 0)
-        log_error("%s Failed to send close packet: %s", c->addr, socket_strerror());
+    if (send_packet(c, PACKET_TYPE_CLOSE, NULL, 0, &message) < 0)
+        log_error("%s Failed to send close packet: %s", c->addr, message);
 
     pool_put(&pool, (void *)c->iptr);
     client_free(c);
@@ -359,12 +358,17 @@ static void handle_data(client_t *c, char *src, size_t srclen) {
         log_warn("%s Handling data packet warning: %s", c->addr, message);
 }
 
-static void handle_client_removal(client_t *c) {
+static int maybe_remove_client(client_t *c) {
     if (time(NULL) - c->timer > STREAM_TIMEOUT_SECONDS) {
         log_info("%s Client timeout", c->addr);
         remove_client(c);
-    } else if (c->removed)
+        return 1;
+    }
+    if (c->removed) {
         remove_client(c);
+        return 1;
+    }
+    return 0;
 }
 
 int main() {
@@ -421,8 +425,8 @@ int main() {
                 client_t *c = clients[i];
                 if (!c)
                     continue;
-                handle_client_removal(c);
-                send_heartbeat(c);
+                if (!maybe_remove_client(c))
+                    send_heartbeat(c);
             }
             time(&timer);
         }
