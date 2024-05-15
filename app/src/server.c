@@ -43,6 +43,7 @@ typedef struct {
     time_t timer;
     audio_stream_params_t params;
     crypto_t crypto;
+    size_t off;
     const uint8_t *iptr;
     struct sockaddr *sa;
     OpusEncoder *enc;
@@ -107,19 +108,20 @@ static void send_heartbeat(client_t *c) {
 static audio_callback_result_t on_record(const void *src, size_t srclen, void *userdata) {
     const char *message;
     client_t *c = userdata;
+    size_t bufsize = audio_stream_frame_bufsize(&c->params, c->params.frame_duration);
 
     char *buf = c->buf;
     size_t buflen = sizeof(c->buf);
     size_t off = 0;
     while (off < srclen) {
         size_t left = srclen - off;
-        size_t size = MIN(left, FRAGMENT_SIZE);
-        int res = callback_write_record(src + off, size, &c->params, c->enc, buf, buflen, &message);
+        size_t size = MIN(bufsize, left);
+        int res = callback_record_write(src + off, size, &c->params, c->enc, buf, buflen, &message);
         if (res < 0) {
             log_error("%s Failed to write data packet: %s", c->addr, message);
             return AUDIO_STREAM_ABORT;
         }
-        if (send_packet(c, PACKET_TYPE_DATA, buf, res, &message) < 0) {
+        if (res > 0 && send_packet(c, PACKET_TYPE_DATA, buf, res, &message) < 0) {
             log_error("%s Failed to send audio frame: %s", c->addr, message);
             return AUDIO_STREAM_ABORT;
         }
@@ -132,7 +134,7 @@ static audio_callback_result_t on_record(const void *src, size_t srclen, void *u
 static audio_callback_result_t on_playback(void *dst, size_t *dstlen, void *userdata) {
     const char *message;
     client_t *c = userdata;
-    int res = callback_read_playback(dst, dstlen, c->rb, &message);
+    int res = callback_playback_read(dst, dstlen, c->rb, &message);
     if (res < 0) {
         log_error("%s Failed to read audio frames: %s", c->addr, message);
         return AUDIO_STREAM_ABORT;
@@ -229,10 +231,12 @@ static client_t *client_new(const uint8_t *iptr,
         params.frame_duration = FRAME_OPUS_DURATION;
     }
 
+    size_t fcount = audio_stream_frame_count(&c->params, FRAME_BUFFER_DURATION);
+    size_t fsize = audio_stream_frame_size(&c->params);
+
     c->sa = malloc_copy(sa, socklen);
     c->stream = audio_stream_new(&c->params);
-    c->rb =
-        ringbuf_new(audio_stream_frame_count(&c->params, FRAME_BUFFER_DURATION), audio_stream_frame_size(&c->params));
+    c->rb = ringbuf_new(fcount, fsize);
     strncpy(c->addr, addr, sizeof(c->addr));
     time(&c->timer);
 
@@ -351,7 +355,7 @@ fail:
 
 static void handle_data(client_t *c, char *src, size_t srclen) {
     const char *message;
-    int res = callback_read_ringbuf(src, srclen, &c->params, c->dec, c->rb, &message);
+    int res = callback_playback_write(src, srclen, &c->params, c->dec, c->rb, &message);
     if (res < -1)
         log_error("%s Handling data packet error: %s", c->addr, message);
     else if (res < 0)

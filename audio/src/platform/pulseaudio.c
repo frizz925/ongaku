@@ -26,7 +26,8 @@
     if (ctx->error_cb != NULL) \
         ctx->error_cb(message, ctx->userdata);
 
-static const pa_stream_flags_t stream_flags = PA_STREAM_ADJUST_LATENCY;
+#define STREAM_FLAGS PA_STREAM_ADJUST_LATENCY
+
 static pa_threaded_mainloop *mainloop = NULL;
 static atomic_int lock_count = 0;
 
@@ -196,10 +197,10 @@ static void context_init(stream_context_t *context,
 static int context_start(stream_context_t *ctx, const char **message) {
     if (ctx->running || !ctx->pa_stream)
         return 0;
-    int err =
-        ctx->direction == STREAM_DIRECTION_IN
-            ? pa_stream_connect_record(ctx->pa_stream, NULL, &ctx->stream->buffer_attr, stream_flags)
-            : pa_stream_connect_playback(ctx->pa_stream, NULL, &ctx->stream->buffer_attr, stream_flags, NULL, NULL);
+    audio_stream_t *stream = ctx->stream;
+    int err = ctx->direction == STREAM_DIRECTION_IN
+                  ? pa_stream_connect_record(ctx->pa_stream, NULL, &stream->buffer_attr, STREAM_FLAGS)
+                  : pa_stream_connect_playback(ctx->pa_stream, NULL, &stream->buffer_attr, STREAM_FLAGS, NULL, NULL);
     if (err) {
         SET_MESSAGE(message, pa_strerror(err));
         return -1;
@@ -275,8 +276,10 @@ void audio_stream_init(audio_stream_t *stream, const audio_stream_params_t *para
 
     size_t bufsize = audio_stream_frame_bufsize(params, params->frame_duration);
     stream->buffer_attr.maxlength = bufsize;
-    stream->buffer_attr.tlength = bufsize;
-    stream->buffer_attr.prebuf = sizeof(uint32_t) - 1;
+    stream->buffer_attr.tlength = (uint32_t)-1;
+    stream->buffer_attr.prebuf = (uint32_t)-1;
+    stream->buffer_attr.minreq = (uint32_t)-1;
+    stream->buffer_attr.fragsize = (uint32_t)-1;
 
     pa_mainloop_api *api = pa_threaded_mainloop_get_api(mainloop);
     stream->pa_context = pa_context_new(api, params->application_name);

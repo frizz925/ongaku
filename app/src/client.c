@@ -88,19 +88,20 @@ static audio_callback_result_t on_record(const void *src, size_t srclen, void *u
         log_info("Server timeout");
         return AUDIO_STREAM_COMPLETE;
     }
+    size_t bufsize = audio_stream_frame_bufsize(ctx->params, ctx->params->frame_duration);
 
     char *buf = ctx->buf;
     size_t buflen = sizeof(ctx->buf);
     size_t off = 0;
     while (off < srclen) {
         size_t left = srclen - off;
-        size_t size = MIN(left, FRAGMENT_SIZE);
-        int res = callback_write_record(src + off, size, ctx->params, ctx->enc, buf, buflen, &message);
+        size_t size = MIN(bufsize, left);
+        int res = callback_record_write(src + off, size, ctx->params, ctx->enc, buf, buflen, &message);
         if (res < 0) {
             log_error("Failed to write data packet: %s", message);
             return AUDIO_STREAM_ABORT;
         }
-        if (send_packet(ctx, PACKET_TYPE_DATA, buf, res, &message) < 0) {
+        if (res > 0 && send_packet(ctx, PACKET_TYPE_DATA, buf, res, &message) < 0) {
             log_error("Failed to send audio frame: %s", message);
             return AUDIO_STREAM_ABORT;
         }
@@ -113,7 +114,7 @@ static audio_callback_result_t on_record(const void *src, size_t srclen, void *u
 static audio_callback_result_t on_playback(void *dst, size_t *dstlen, void *userdata) {
     const char *message;
     context_t *ctx = userdata;
-    int res = callback_read_playback(dst, dstlen, ctx->rb, &message);
+    int res = callback_playback_read(dst, dstlen, ctx->rb, &message);
     if (res < 0) {
         log_error("Failed to read audio frames: %s", message);
         return AUDIO_STREAM_ABORT;
@@ -131,7 +132,7 @@ static void on_finished(void *userdata) {
 
 static void handle_data(context_t *ctx, char *src, size_t srclen) {
     const char *message;
-    int res = callback_read_ringbuf(src, srclen, ctx->params, ctx->dec, ctx->rb, &message);
+    int res = callback_playback_write(src, srclen, ctx->params, ctx->dec, ctx->rb, &message);
     if (res < -1)
         log_error("Handling data packet error: %s", message);
     else if (res < 0)
@@ -145,14 +146,14 @@ static int application_loop(int flags,
                             socklen_t socklen,
                             const char *addr,
                             const audio_stream_params_t *params,
-                            ringbuf_t *rb) {
+                            ringbuf_t *play_rb) {
     int rc = EXIT_SUCCESS;
     int err;
     const char *message;
     audio_stream_t *stream = NULL;
     crypto_t crypto = {0};
     context_t ctx = {
-        .rb = rb,
+        .rb = play_rb,
         .params = params,
         .crypto = &crypto,
         .enc = NULL,
@@ -394,7 +395,7 @@ int main(int argc, char *argv[]) {
                 flags |= STREAMCFG_FLAG_INPUT;
             else if (strncasecmp(optarg, "out", 3) == 0)
                 flags |= STREAMCFG_FLAG_OUTPUT;
-            else
+            else if (strncasecmp(optarg, "duplex", 6) == 0)
                 flags |= STREAMCFG_FLAG_DUPLEX;
             break;
         case 'i':
@@ -417,8 +418,9 @@ int main(int argc, char *argv[]) {
         }
     }
 
+    if ((flags & STREAMCFG_DIRECTION_MASK) == 0)
+        flags |= STREAMCFG_FLAG_OUTPUT;
     log_debug("flags=%d", flags);
-    assert(flags & STREAMCFG_DIRECTION_MASK);
 
     if (optind >= argc)
         usage(EXIT_FAILURE);
@@ -450,8 +452,10 @@ int main(int argc, char *argv[]) {
     signal(SIGINT, on_signal);
     signal(SIGTERM, on_signal);
 
-    ringbuf_t *rb =
-        ringbuf_new(audio_stream_frame_count(&params, FRAME_BUFFER_DURATION), audio_stream_frame_size(&params));
+    size_t fcount = audio_stream_frame_count(&params, FRAME_BUFFER_DURATION);
+    size_t fsize = audio_stream_frame_size(&params);
+
+    ringbuf_t *rb = ringbuf_new(fcount, fsize);
     while (running && rc == EXIT_SUCCESS) {
         ringbuf_clear(rb);
         rc = application_loop(flags, indev, outdev, sa, socklen, addr, &params, rb);
