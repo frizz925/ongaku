@@ -108,14 +108,13 @@ static void send_heartbeat(client_t *c) {
 static audio_callback_result_t on_record(const void *src, size_t srclen, void *userdata) {
     const char *message;
     client_t *c = userdata;
-    size_t bufsize = audio_stream_frame_bufsize(&c->params, c->params.frame_duration);
 
     char *buf = c->buf;
     size_t buflen = sizeof(c->buf);
     size_t off = 0;
     while (off < srclen) {
         size_t left = srclen - off;
-        size_t size = MIN(bufsize, left);
+        size_t size = MIN(FRAGMENT_SIZE, left);
         int res = callback_record_write(src + off, size, &c->params, c->enc, buf, buflen, &message);
         if (res < 0) {
             log_error("%s Failed to write data packet: %s", c->addr, message);

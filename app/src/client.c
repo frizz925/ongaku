@@ -88,14 +88,13 @@ static audio_callback_result_t on_record(const void *src, size_t srclen, void *u
         log_info("Server timeout");
         return AUDIO_STREAM_COMPLETE;
     }
-    size_t bufsize = audio_stream_frame_bufsize(ctx->params, ctx->params->frame_duration);
 
     char *buf = ctx->buf;
     size_t buflen = sizeof(ctx->buf);
     size_t off = 0;
     while (off < srclen) {
         size_t left = srclen - off;
-        size_t size = MIN(bufsize, left);
+        size_t size = MIN(FRAGMENT_SIZE, left);
         int res = callback_record_write(src + off, size, ctx->params, ctx->enc, buf, buflen, &message);
         if (res < 0) {
             log_error("Failed to write data packet: %s", message);
