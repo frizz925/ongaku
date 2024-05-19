@@ -10,8 +10,6 @@
 #define SAMPLE_FORMAT short
 #define SAMPLE_SIZE sizeof(SAMPLE_FORMAT)
 
-#define OPUS_APPLICATION OPUS_APPLICATION_AUDIO
-
 typedef enum audio_format {
     AUDIO_FORMAT_S16,
     AUDIO_FORMAT_F32,
