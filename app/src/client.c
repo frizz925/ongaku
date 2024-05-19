@@ -1,7 +1,7 @@
 #define _POSIX_C_SOURCE 200809L
 
 #include "callbacks.h"
-#include "consts.h"
+#include "constants.h"
 #include "crypto/crypto.h"
 #include "crypto/plaintext.h"
 #include "crypto/sodium.h"
@@ -451,7 +451,7 @@ int main(int argc, char *argv[]) {
     signal(SIGINT, on_signal);
     signal(SIGTERM, on_signal);
 
-    size_t fcount = audio_stream_frame_count(&params, FRAME_BUFFER_DURATION);
+    size_t fcount = audio_stream_frame_count(&params, FRAME_CLIENT_BUFFER_DURATION);
     size_t fsize = audio_stream_frame_size(&params);
 
     ringbuf_t *rb = ringbuf_new(fcount, fsize);

@@ -1,7 +1,7 @@
 #define _POSIX_C_SOURCE 200809L
 
 #include "callbacks.h"
-#include "consts.h"
+#include "constants.h"
 #include "crypto/crypto.h"
 #include "crypto/plaintext.h"
 #include "crypto/sodium.h"
@@ -230,7 +230,7 @@ static client_t *client_new(const uint8_t *iptr,
         params.frame_duration = FRAME_OPUS_DURATION;
     }
 
-    size_t fcount = audio_stream_frame_count(&c->params, FRAME_BUFFER_DURATION);
+    size_t fcount = audio_stream_frame_count(&c->params, FRAME_SERVER_BUFFER_DURATION);
     size_t fsize = audio_stream_frame_size(&c->params);
 
     c->sa = malloc_copy(sa, socklen);
