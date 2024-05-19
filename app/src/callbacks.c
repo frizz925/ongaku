@@ -43,8 +43,9 @@ int callback_playback_read(void *dst, size_t *dstlen, ringbuf_t *rb, const char 
     size_t frames = ringbuf_remaining(rb);
     size_t req_frames = buflen / size;
     if (frames < req_frames) {
+        SET_MESSAGE(message, "Ring buffer underflow!");
         memset(dst, 0, buflen);
-        return buflen;
+        return 0;
     }
     size_t len = ringbuf_read(rb, dst, req_frames) * size;
     *dstlen = len;
@@ -62,7 +63,7 @@ int callback_playback_write(const void *src,
     const char *ptr = src + packet_audio_header_read(src, srclen, &frames_in);
     if (frames_in <= 0) {
         SET_MESSAGE(message, "Invalid data header");
-        return -2;
+        return 0;
     }
     size_t len = tail - ptr;
 
@@ -70,12 +71,12 @@ int callback_playback_write(const void *src,
     if (!dec) {
         if (frames_in * audio_stream_frame_size(params) > len) {
             SET_MESSAGE(message, "Invalid frame count");
-            return -2;
+            return 0;
         }
         size_t frames_out = ringbuf_available(rb);
         if (frames_out < frames_in) {
             SET_MESSAGE(message, "Ring buffer overflow!");
-            return -1;
+            return 0;
         }
         ringbuf_write(rb, ptr, frames_in);
         return srclen;
@@ -93,7 +94,7 @@ int callback_playback_write(const void *src,
                   : opus_decode(dec, (unsigned char *)ptr, len, (opus_int16 *)buf, frames_out, 0);
     if (res < 0) {
         SET_MESSAGE(message, opus_strerror(res));
-        return -1;
+        return 0;
     }
 
     ringbuf_commit_write(rb, res);

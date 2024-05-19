@@ -135,9 +135,10 @@ static audio_callback_result_t on_playback(void *dst, size_t *dstlen, void *user
     client_t *c = userdata;
     int res = callback_playback_read(dst, dstlen, c->rb, &message);
     if (res < 0) {
-        log_error("%s Failed to read audio frames: %s", c->addr, message);
+        log_error("%s Reading playback error: %s", c->addr, message);
         return AUDIO_STREAM_ABORT;
-    }
+    } else if (res == 0)
+        log_debug("%s Reading playback warning: %s", c->addr, message);
     return AUDIO_STREAM_CONTINUE;
 }
 
@@ -355,10 +356,10 @@ fail:
 static void handle_data(client_t *c, char *src, size_t srclen) {
     const char *message;
     int res = callback_playback_write(src, srclen, &c->params, c->dec, c->rb, &message);
-    if (res < -1)
-        log_error("%s Handling data packet error: %s", c->addr, message);
-    else if (res < 0)
-        log_warn("%s Handling data packet warning: %s", c->addr, message);
+    if (res < 0)
+        log_error("%s Writing playback error: %s", c->addr, message);
+    else if (res == 0)
+        log_debug("%s Writing playback warning: %s", c->addr, message);
 }
 
 static int maybe_remove_client(client_t *c) {
