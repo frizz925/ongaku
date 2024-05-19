@@ -144,7 +144,7 @@ static int context_init(stream_context_t *ctx,
                                 direction == DIRECTION_IN ? &ctx->pa_params : NULL,
                                 direction == DIRECTION_OUT ? &ctx->pa_params : NULL,
                                 params->sample_rate,
-                                stream->frame_count,
+                                direction == DIRECTION_OUT ? stream->frame_count : paFramesPerBufferUnspecified,
                                 0,
                                 direction == DIRECTION_IN ? on_stream_input : on_stream_output,
                                 ctx);
