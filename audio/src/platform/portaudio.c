@@ -78,7 +78,7 @@ static int on_stream_output(const void *input,
     const audio_stream_params_t *params = &ctx->stream->params;
     size_t len = frame_count * params->channels * params->sample_size;
     size_t res = len;
-    audio_callback_result_t result = ctx->playback_cb(output, &res, ctx->userdata);
+    audio_callback_result_t result = ctx->playback_cb(output, &res, len, ctx->userdata);
     size_t left = len - res;
     if (left > 0)
         memset(output + res, 0, left);

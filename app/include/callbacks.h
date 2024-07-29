@@ -13,7 +13,7 @@ int callback_record_write(const void *src,
                           void *dst,
                           size_t dstlen,
                           const char **message);
-int callback_playback_read(void *dst, size_t *dstlen, ringbuf_t *rb, const char **message);
+int callback_playback_read(void *dst, size_t *dstlen, size_t reqlen, ringbuf_t *rb, const char **message);
 int callback_playback_write(const void *src,
                             size_t srclen,
                             const audio_stream_params_t *params,

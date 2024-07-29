@@ -20,6 +20,8 @@
 #include <stdbool.h>
 #include <time.h>
 
+#define MIN_FRAMES 4096
+
 static pool_t pool;
 static socket_t sock = SOCKET_UNDEFINED;
 static atomic_bool running = true;
@@ -37,18 +39,19 @@ static void on_signal(int sig) {
 typedef struct {
     uint8_t idx;
     atomic_bool removed;
-    atomic_bool running;
+    atomic_bool in_running;
+    atomic_bool out_running;
     int flags;
     socklen_t socklen;
     time_t timer;
     audio_stream_params_t params;
     crypto_t crypto;
-    size_t off;
     const uint8_t *iptr;
     struct sockaddr *sa;
     OpusEncoder *enc;
     OpusDecoder *dec;
-    audio_stream_t *stream;
+    audio_stream_t *instream;
+    audio_stream_t *outstream;
     ringbuf_t *rb;
     char addr[64];
     char buf[SOCKET_BUFSIZE];
@@ -130,10 +133,10 @@ static audio_callback_result_t on_record(const void *src, size_t srclen, void *u
     return AUDIO_STREAM_CONTINUE;
 }
 
-static audio_callback_result_t on_playback(void *dst, size_t *dstlen, void *userdata) {
+static audio_callback_result_t on_playback(void *dst, size_t *dstlen, size_t reqlen, void *userdata) {
     const char *message;
     client_t *c = userdata;
-    int res = callback_playback_read(dst, dstlen, c->rb, &message);
+    int res = callback_playback_read(dst, dstlen, reqlen, c->rb, &message);
     if (res < 0) {
         log_error("%s Reading playback error: %s", c->addr, message);
         return AUDIO_STREAM_ABORT;
@@ -153,8 +156,10 @@ static void on_finished(void *userdata) {
 }
 
 static void client_free(client_t *c) {
-    if (c->stream)
-        audio_stream_free(c->stream);
+    if (c->instream)
+        audio_stream_free(c->instream);
+    if (c->outstream)
+        audio_stream_free(c->outstream);
     if (c->enc)
         opus_encoder_destroy(c->enc);
     if (c->rb)
@@ -214,8 +219,6 @@ static client_t *client_new(const uint8_t *iptr,
         params.sample_size = sizeof(opus_int16);
         params.sample_format = AUDIO_FORMAT_S16;
     }
-    memcpy(&c->params, &params, sizeof(params));
-
     if (c->flags & STREAMCFG_FLAG_CODEC_OPUS) {
         int err;
         c->enc = opus_encoder_create(params.sample_rate, params.channels, OPUS_APPLICATION, &err);
@@ -230,12 +233,14 @@ static client_t *client_new(const uint8_t *iptr,
         }
         params.frame_duration = FRAME_OPUS_DURATION;
     }
+    memcpy(&c->params, &params, sizeof(params));
 
     size_t fcount = audio_stream_frame_count(&c->params, FRAME_SERVER_BUFFER_DURATION);
     size_t fsize = audio_stream_frame_size(&c->params);
 
     c->sa = malloc_copy(sa, socklen);
-    c->stream = audio_stream_new(&c->params);
+    c->instream = c->flags & STREAMCFG_FLAG_INPUT ? audio_stream_new(&c->params) : NULL;
+    c->outstream = c->flags & STREAMCFG_FLAG_OUTPUT ? audio_stream_new(&c->params) : NULL;
     c->rb = ringbuf_new(fcount, fsize);
     strncpy(c->addr, addr, sizeof(c->addr));
     time(&c->timer);
@@ -247,44 +252,70 @@ fail:
     return NULL;
 }
 
-static int client_start(client_t *c, const char *indev, const char *outdev, const char **message) {
-    if (c->running)
+static int client_start_record(client_t *c, const char *indev, const char **message) {
+    if (c->in_running || !c->instream)
         return 0;
-    if (audio_stream_connect(c->stream, message))
+    if (audio_stream_connect(c->instream, message))
         goto fail;
-    if (c->flags & STREAMCFG_FLAG_INPUT &&
-        audio_stream_open_record(c->stream, indev, c->addr, on_record, on_error, on_finished, c, message))
+    if (audio_stream_open_record(c->instream, indev, c->addr, on_record, on_error, on_finished, c, message))
         goto disconnect_fail;
-    if (c->flags & STREAMCFG_FLAG_OUTPUT &&
-        audio_stream_open_playback(c->stream, outdev, c->addr, on_playback, on_error, on_finished, c, message))
+    if (audio_stream_start(c->instream, message))
         goto disconnect_fail;
-    if (audio_stream_start(c->stream, message))
-        goto disconnect_fail;
-    c->running = true;
+    c->in_running = true;
     return 0;
 
 disconnect_fail:
-    audio_stream_close_playback(c->stream, message);
-    audio_stream_close_record(c->stream, message);
-    audio_stream_disconnect(c->stream, message);
+    audio_stream_close_record(c->instream, message);
+    audio_stream_disconnect(c->instream, message);
 
 fail:
-    audio_stream_deinit(c->stream);
+    audio_stream_deinit(c->instream);
     return -1;
 }
 
-static int client_stop(client_t *c, const char **message) {
-    if (!c->running)
+static int client_start_playback(client_t *c, const char *outdev, const char **message) {
+    if (c->out_running || !c->outstream)
         return 0;
-    if (audio_stream_stop(c->stream, message))
+    if (audio_stream_connect(c->outstream, message))
+        goto fail;
+    if (audio_stream_open_playback(c->outstream, outdev, c->addr, on_playback, on_error, on_finished, c, message))
+        goto disconnect_fail;
+    if (audio_stream_start(c->outstream, message))
+        goto disconnect_fail;
+    c->out_running = true;
+    return 0;
+
+disconnect_fail:
+    audio_stream_close_playback(c->outstream, message);
+
+fail:
+    audio_stream_deinit(c->outstream);
+    return -1;
+}
+
+static int client_stop_record(client_t *c, const char **message) {
+    if (!c->in_running || !c->instream)
+        return 0;
+    if (audio_stream_stop(c->instream, message))
         return -1;
-    if (audio_stream_close_playback(c->stream, message))
+    if (audio_stream_close_record(c->instream, message))
         return -1;
-    if (audio_stream_close_record(c->stream, message))
+    if (audio_stream_disconnect(c->instream, message))
         return -1;
-    if (audio_stream_disconnect(c->stream, message))
+    c->in_running = false;
+    return 0;
+}
+
+static int client_stop_playback(client_t *c, const char **message) {
+    if (!c->out_running || !c->outstream)
+        return 0;
+    if (audio_stream_stop(c->outstream, message))
         return -1;
-    c->running = false;
+    if (audio_stream_close_playback(c->outstream, message))
+        return -1;
+    if (audio_stream_disconnect(c->outstream, message))
+        return -1;
+    c->out_running = false;
     return 0;
 }
 
@@ -314,11 +345,17 @@ static client_t *add_client(const struct sockaddr *sa,
 
 static void remove_client(client_t *c) {
     const char *message;
-    if (c->running) {
-        if (client_stop(c, &message))
-            log_error("%s Failed to stop client: %s", c->addr, message);
+    if (c->in_running) {
+        if (client_stop_record(c, &message))
+            log_error("%s Failed to stop client recording: %s", c->addr, message);
         else
-            log_info("%s Client stopped", c->addr);
+            log_info("%s Client recording stopped", c->addr);
+    }
+    if (c->out_running) {
+        if (client_stop_playback(c, &message))
+            log_error("%s Failed to stop client playback: %s", c->addr, message);
+        else
+            log_info("%s Client playback stopped", c->addr);
     }
     clients[c->idx] = NULL;
     log_debug("%s Client removed, index: %d", c->addr, c->idx);
@@ -341,11 +378,13 @@ static void handle_handshake(const struct sockaddr *sa, socklen_t socklen, const
         log_error("%s Failed to send handshake response: %s", addr, message);
         goto fail;
     }
-    if (client_start(client, NULL, NULL, &message)) {
-        log_error("%s Failed to start client: %s", client->addr, message);
-        goto fail;
+    if (client->instream) {
+        if (client_start_record(client, NULL, &message)) {
+            log_error("%s Failed to start client: %s", client->addr, message);
+            goto fail;
+        }
+        log_info("%s Client recording started", addr);
     }
-    log_info("%s Client started", addr);
     return;
 
 fail:
@@ -354,12 +393,25 @@ fail:
 }
 
 static void handle_data(client_t *c, char *src, size_t srclen) {
+    if (!c->outstream)
+        return;
+
     const char *message;
     int res = callback_playback_write(src, srclen, &c->params, c->dec, c->rb, &message);
-    if (res < 0)
+    if (res < 0) {
         log_error("%s Writing playback error: %s", c->addr, message);
-    else if (res == 0)
+        return;
+    } else if (res == 0)
         log_debug("%s Writing playback warning: %s", c->addr, message);
+
+    if (!c->out_running && ringbuf_remaining(c->rb) >= MIN_FRAMES) {
+        if (client_start_playback(c, NULL, &message)) {
+            log_error("%s Failed to start playback: %s", c->addr, message);
+            remove_client(c);
+            return;
+        }
+        log_info("%s Client playback started", c->addr);
+    }
 }
 
 static int maybe_remove_client(client_t *c) {

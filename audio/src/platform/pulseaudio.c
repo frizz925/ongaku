@@ -107,20 +107,22 @@ end:
     }
 }
 
-static void on_stream_write(pa_stream *stream, size_t nbytes, void *userdata) {
+static void on_stream_write(pa_stream *stream, size_t req_bytes, void *userdata) {
     int err;
     const char *message;
     void *data;
+    size_t nbytes = (size_t)-1;
     audio_callback_result_t result;
     playback_context_t *ctx = (playback_context_t *)userdata;
 
     if (!ctx->running)
         return;
+    nbytes = (size_t)-1;
     if ((err = pa_stream_begin_write(stream, &data, &nbytes))) {
         STREAM_ERROR(ctx, pa_strerror(err));
         goto end;
     }
-    result = ctx->playback_cb(data, &nbytes, ctx->userdata);
+    result = ctx->playback_cb(data, &nbytes, req_bytes, ctx->userdata);
     if (result == AUDIO_STREAM_CONTINUE && nbytes > 0) {
         if ((err = pa_stream_write(stream, data, nbytes, NULL, 0, PA_SEEK_RELATIVE)))
             STREAM_ERROR(ctx, pa_strerror(err));
@@ -275,11 +277,13 @@ void audio_stream_init(audio_stream_t *stream, const audio_stream_params_t *para
     stream->sample_spec.rate = params->sample_rate;
 
     size_t bufsize = audio_stream_frame_bufsize(params, params->frame_duration);
-    stream->buffer_attr.maxlength = bufsize;
-    stream->buffer_attr.tlength = (uint32_t)-1;
+    printf("frame_duration=%.2f\n", params->frame_duration);
+    stream->buffer_attr.maxlength = (uint32_t)-1;
+    stream->buffer_attr.tlength = bufsize;
     stream->buffer_attr.prebuf = (uint32_t)-1;
     stream->buffer_attr.minreq = (uint32_t)-1;
-    stream->buffer_attr.fragsize = (uint32_t)-1;
+    stream->buffer_attr.fragsize = bufsize;
+    printf("tlength=%u\n", stream->buffer_attr.tlength);
 
     pa_mainloop_api *api = pa_threaded_mainloop_get_api(mainloop);
     stream->pa_context = pa_context_new(api, params->application_name);
