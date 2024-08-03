@@ -404,7 +404,7 @@ static void handle_data(client_t *c, char *src, size_t srclen) {
     } else if (res == 0)
         log_debug("%s Writing playback warning: %s", c->addr, message);
 
-    if (!c->out_running && ringbuf_remaining(c->rb) >= MIN_FRAMES) {
+    if (!c->out_running && ringbuf_remaining(c->rb) >= ringbuf_capacity(c->rb) / 2) {
         if (client_start_playback(c, NULL, &message)) {
             log_error("%s Failed to start playback: %s", c->addr, message);
             remove_client(c);
