@@ -436,6 +436,7 @@ int main(int argc, char *argv[]) {
 
     if (flags & STREAMCFG_FLAG_CODEC_OPUS)
         params.frame_duration = FRAME_OPUS_DURATION;
+    log_debug("frame_duration=%.2f", params.frame_duration);
 
     struct sockaddr_in6 sin6;
     struct sockaddr *sa = (struct sockaddr *)&sin6;
@@ -454,10 +455,16 @@ int main(int argc, char *argv[]) {
     size_t fcount = audio_stream_frame_count(&params, FRAME_CLIENT_BUFFER_DURATION);
     size_t fsize = audio_stream_frame_size(&params);
 
+    int retry = 5;
     ringbuf_t *rb = ringbuf_new(fcount, fsize);
-    while (running && rc == EXIT_SUCCESS) {
+    while (running) {
         ringbuf_clear(rb);
         rc = application_loop(flags, indev, outdev, sa, socklen, addr, &params, rb);
+        if (rc == EXIT_SUCCESS || retry <= 0)
+            break;
+        log_info("Application failed. Retrying in 15 seconds. (%d retries left)", retry);
+        retry -= 1;
+        sleep(15);
     }
     ringbuf_free(rb);
 
