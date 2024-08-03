@@ -76,7 +76,7 @@ static int on_stream_output(const void *input,
                             void *userdata) {
     playback_context_t *ctx = userdata;
     const audio_stream_params_t *params = &ctx->stream->params;
-    size_t len = frame_count * params->channels * params->sample_size;
+    size_t len = frame_count * audio_stream_frame_size(params);
     size_t res = len;
     audio_callback_result_t result = ctx->playback_cb(output, &res, len, ctx->userdata);
     size_t left = len - res;
@@ -144,7 +144,7 @@ static int context_init(stream_context_t *ctx,
                                 direction == DIRECTION_IN ? &ctx->pa_params : NULL,
                                 direction == DIRECTION_OUT ? &ctx->pa_params : NULL,
                                 params->sample_rate,
-                                direction == DIRECTION_OUT ? stream->frame_count : paFramesPerBufferUnspecified,
+                                direction == DIRECTION_IN ? stream->frame_count : paFramesPerBufferUnspecified,
                                 0,
                                 direction == DIRECTION_IN ? on_stream_input : on_stream_output,
                                 ctx);
