@@ -49,7 +49,7 @@ typedef enum audio_callback_result {
     AUDIO_STREAM_ABORT,
 } audio_callback_result_t;
 
-typedef audio_callback_result_t (*audio_playback_callback_t)(void *data, size_t *len, size_t reqlen, void *userdata);
+typedef audio_callback_result_t (*audio_playback_callback_t)(void *data, size_t *len, void *userdata);
 typedef audio_callback_result_t (*audio_record_callback_t)(const void *data, size_t len, void *userdata);
 typedef void (*audio_error_callback_t)(const char *message, void *userdata);
 typedef void (*audio_finished_callback_t)(void *userdata);

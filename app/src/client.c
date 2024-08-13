@@ -110,10 +110,10 @@ static audio_callback_result_t on_record(const void *src, size_t srclen, void *u
     return AUDIO_STREAM_CONTINUE;
 }
 
-static audio_callback_result_t on_playback(void *dst, size_t *dstlen, size_t reqlen, void *userdata) {
+static audio_callback_result_t on_playback(void *dst, size_t *dstlen, void *userdata) {
     const char *message;
     context_t *ctx = userdata;
-    int res = callback_playback_read(dst, dstlen, reqlen, ctx->rb, &message);
+    int res = callback_playback_read(dst, dstlen, ctx->rb, &message);
     if (res < 0) {
         log_error("Failed to read audio frames: %s", message);
         return AUDIO_STREAM_ABORT;

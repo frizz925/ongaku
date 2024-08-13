@@ -78,7 +78,7 @@ static int on_stream_output(const void *input,
     const audio_stream_params_t *params = &ctx->stream->params;
     size_t len = frame_count * audio_stream_frame_size(params);
     size_t res = len;
-    audio_callback_result_t result = ctx->playback_cb(output, &res, len, ctx->userdata);
+    audio_callback_result_t result = ctx->playback_cb(output, &res, ctx->userdata);
     size_t left = len - res;
     if (left > 0)
         memset(output + res, 0, left);
@@ -144,8 +144,12 @@ static int context_init(stream_context_t *ctx,
                                 direction == DIRECTION_IN ? &ctx->pa_params : NULL,
                                 direction == DIRECTION_OUT ? &ctx->pa_params : NULL,
                                 params->sample_rate,
-                                direction == DIRECTION_IN ? stream->frame_count : paFramesPerBufferUnspecified,
-                                0,
+#ifdef _WIN32
+                                paFramesPerBufferUnspecified,
+#else
+                                audio_stream_frame_count(params, params->frame_duration),
+#endif
+                                paClipOff | paDitherOff,
                                 direction == DIRECTION_IN ? on_stream_input : on_stream_output,
                                 ctx);
     if (err) {

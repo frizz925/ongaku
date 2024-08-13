@@ -133,10 +133,10 @@ static audio_callback_result_t on_record(const void *src, size_t srclen, void *u
     return AUDIO_STREAM_CONTINUE;
 }
 
-static audio_callback_result_t on_playback(void *dst, size_t *dstlen, size_t reqlen, void *userdata) {
+static audio_callback_result_t on_playback(void *dst, size_t *dstlen, void *userdata) {
     const char *message;
     client_t *c = userdata;
-    int res = callback_playback_read(dst, dstlen, reqlen, c->rb, &message);
+    int res = callback_playback_read(dst, dstlen, c->rb, &message);
     if (res < 0) {
         log_error("%s Reading playback error: %s", c->addr, message);
         return AUDIO_STREAM_ABORT;
@@ -404,14 +404,20 @@ static void handle_data(client_t *c, char *src, size_t srclen) {
     } else if (res == 0)
         log_debug("%s Writing playback warning: %s", c->addr, message);
 
-    if (!c->out_running && ringbuf_remaining(c->rb) >= ringbuf_capacity(c->rb) / 2) {
-        if (client_start_playback(c, NULL, &message)) {
-            log_error("%s Failed to start playback: %s", c->addr, message);
-            remove_client(c);
-            return;
-        }
-        log_info("%s Client playback started", c->addr);
+    if (c->out_running)
+        return;
+
+    audio_stream_params_t *params = &c->params;
+    size_t fcount = audio_stream_frame_count(params, params->frame_duration);
+    if (ringbuf_remaining(c->rb) < fcount)
+        return;
+
+    if (client_start_playback(c, NULL, &message)) {
+        log_error("%s Failed to start playback: %s", c->addr, message);
+        remove_client(c);
+        return;
     }
+    log_info("%s Client playback started", c->addr);
 }
 
 static int maybe_remove_client(client_t *c) {
